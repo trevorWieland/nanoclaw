@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, execSync, spawn } from "child_process";
+import { ChildProcess, exec, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -10,18 +10,24 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
 } from "./config.js";
-import { readEnvFile } from "./env.js";
 import { resolveGroupFolderPath, resolveGroupIpcPath } from "./group-folder.js";
 import { logger } from "./logger.js";
-import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from "./container-runtime.js";
+import {
+  CONTAINER_HOST_GATEWAY,
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  readonlyMountArgs,
+  stopContainer,
+} from "./container-runtime.js";
+import { detectAuthMode } from "./credential-proxy.js";
 import { validateAdditionalMounts } from "./mount-security.js";
 import {
-  checkCircuit,
   isAuthError,
   recordAuthFailure,
   recordAuthSuccess,
@@ -40,7 +46,6 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -74,7 +79,7 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Secrets are passed via stdin instead (see readSecrets()).
+    // Credentials are injected by the credential proxy, never exposed to containers.
     const envFile = path.join(projectRoot, ".env");
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -203,112 +208,31 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   return mounts;
 }
 
-/**
- * Refresh an OAuth token using the standard OAuth2 refresh_token grant.
- * Updates the credentials file on success so other processes benefit.
- */
-function refreshOAuthToken(
-  refreshToken: string,
-  credentialsPath: string,
-  creds: Record<string, any>,
-): string | null {
-  try {
-    // Standard OAuth2 refresh_token grant against Claude's token endpoint.
-    // Pass token via stdin (not CLI arg) to avoid exposure in process list.
-    const result = execSync(
-      `curl -s -X POST https://platform.claude.com/v1/oauth/token ` +
-        `-H "Content-Type: application/x-www-form-urlencoded" ` +
-        `--data-urlencode @-`,
-      {
-        input: `grant_type=refresh_token&refresh_token=${refreshToken}`,
-        timeout: 10_000,
-        encoding: "utf-8",
-      },
-    );
-    const data = JSON.parse(result);
-    if (data.access_token) {
-      // Update credentials file so future reads get the fresh token
-      creds.claudeAiOauth.accessToken = data.access_token;
-      if (data.expires_in) {
-        creds.claudeAiOauth.expiresAt = Date.now() + data.expires_in * 1000;
-      }
-      if (data.refresh_token) {
-        creds.claudeAiOauth.refreshToken = data.refresh_token;
-      }
-      fs.writeFileSync(credentialsPath, JSON.stringify(creds, null, 2), {
-        mode: 0o600,
-      });
-      logger.info("OAuth token refreshed successfully");
-      return data.access_token;
-    }
-    logger.error({ response: data }, "OAuth refresh: no access_token in response");
-  } catch (err) {
-    logger.error({ error: err }, "OAuth token refresh failed");
-  }
-  return null;
-}
-
-/**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
- *
- * Priority: .env CLAUDE_CODE_OAUTH_TOKEN (long-lived, from `claude setup-token`)
- * takes precedence over the credentials file (short-lived, from `/login`).
- */
-function readSecrets(): Record<string, string> {
-  // Check circuit breaker before attempting token read
-  const circuit = checkCircuit();
-  if (!circuit.allowed) {
-    throw new Error(circuit.reason!);
-  }
-
-  const secrets = readEnvFile(["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]);
-
-  // Prefer .env CLAUDE_CODE_OAUTH_TOKEN (long-lived setup-token).
-  // Only fall back to credentials file when .env has no token.
-  const envSecrets = readEnvFile(["CLAUDE_CODE_OAUTH_TOKEN"]);
-  if (envSecrets.CLAUDE_CODE_OAUTH_TOKEN) {
-    secrets.CLAUDE_CODE_OAUTH_TOKEN = envSecrets.CLAUDE_CODE_OAUTH_TOKEN;
-    return secrets;
-  }
-
-  // Fall back to credentials file (short-lived /login token)
-  const credentialsPath = path.join(
-    process.env.HOME || "/home/node",
-    ".claude",
-    ".credentials.json",
-  );
-  try {
-    const creds = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
-    const oauth = creds.claudeAiOauth;
-    if (oauth?.accessToken) {
-      // Check if token is expired or expiring within 5 minutes
-      const expiresAt = oauth.expiresAt || 0;
-      const isExpired = Date.now() > expiresAt - 5 * 60 * 1000;
-
-      if (isExpired && oauth.refreshToken) {
-        const refreshed = refreshOAuthToken(oauth.refreshToken, credentialsPath, creds);
-        if (!refreshed) {
-          recordAuthFailure();
-        }
-        secrets.CLAUDE_CODE_OAUTH_TOKEN = refreshed || oauth.accessToken;
-      } else {
-        secrets.CLAUDE_CODE_OAUTH_TOKEN = oauth.accessToken;
-      }
-    }
-  } catch {
-    // Credentials file missing or unparseable and no .env token
-    logger.warn("No OAuth token available: .env empty and credentials file unreadable");
-  }
-
-  return secrets;
-}
-
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push("-e", `TZ=${TIMEZONE}`);
+
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Runtime-specific args for host gateway resolution
+  args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -384,12 +308,8 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = "";
