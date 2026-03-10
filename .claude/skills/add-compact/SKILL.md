@@ -30,6 +30,7 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-compact
 ```
 
 This deterministically:
+
 - Adds `src/session-commands.ts` (extract and authorize session commands)
 - Adds `src/session-commands.test.ts` (unit tests for command parsing and auth)
 - Three-way merges session command interception into `src/index.ts` (both `processGroupMessages` and `startMessageLoop`)
@@ -37,6 +38,7 @@ This deterministically:
 - Records application in `.nanoclaw/state.yaml`
 
 If merge conflicts occur, read the intent files:
+
 - `modify/src/index.ts.intent.md`
 - `modify/container/agent-runner/src/index.ts.intent.md`
 

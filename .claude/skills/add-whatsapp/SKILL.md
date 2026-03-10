@@ -208,7 +208,7 @@ AskUserQuestion: Where do you want to chat with the assistant?
 node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','utf-8'));console.log(c.me?.id?.split(':')[0]+'@s.whatsapp.net')"
 ```
 
-**DM with bot:** The JID is the **user's** phone number — the number they will message *from* (not the bot's own number). Ask:
+**DM with bot:** The JID is the **user's** phone number — the number they will message _from_ (not the bot's own number). Ask:
 
 AskUserQuestion: What is your personal phone number? (The number you'll use to message the bot — include country code without +, e.g. 1234567890)
 

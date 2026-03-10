@@ -1,5 +1,5 @@
-import type { NewMessage } from './types.js';
-import { logger } from './logger.js';
+import type { NewMessage } from "./types.js";
+import { logger } from "./logger.js";
 
 /**
  * Extract a session slash command from a message, stripping the trigger prefix if present.
@@ -7,8 +7,8 @@ import { logger } from './logger.js';
  */
 export function extractSessionCommand(content: string, triggerPattern: RegExp): string | null {
   let text = content.trim();
-  text = text.replace(triggerPattern, '').trim();
-  if (text === '/compact') return '/compact';
+  text = text.replace(triggerPattern, "").trim();
+  if (text === "/compact") return "/compact";
   return null;
 }
 
@@ -22,7 +22,7 @@ export function isSessionCommandAllowed(isMainGroup: boolean, isFromMe: boolean)
 
 /** Minimal agent result interface — matches the subset of ContainerOutput used here. */
 export interface AgentResult {
-  status: 'success' | 'error';
+  status: "success" | "error";
   result?: string | object | null;
 }
 
@@ -33,7 +33,7 @@ export interface SessionCommandDeps {
   runAgent: (
     prompt: string,
     onOutput: (result: AgentResult) => Promise<void>,
-  ) => Promise<'success' | 'error'>;
+  ) => Promise<"success" | "error">;
   closeStdin: () => void;
   advanceCursor: (timestamp: string) => void;
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
@@ -42,9 +42,9 @@ export interface SessionCommandDeps {
 }
 
 function resultToText(result: string | object | null | undefined): string {
-  if (!result) return '';
-  const raw = typeof result === 'string' ? result : JSON.stringify(result);
-  return raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  if (!result) return "";
+  const raw = typeof result === "string" ? result : JSON.stringify(result);
+  return raw.replace(/<internal>[\s\S]*?<\/internal>/g, "").trim();
 }
 
 /**
@@ -76,14 +76,14 @@ export async function handleSessionCommand(opts: {
     // Trade-off: other messages in the same batch are also consumed (cursor is
     // a high-water mark). Acceptable for this narrow edge case.
     if (deps.canSenderInteract(cmdMsg)) {
-      await deps.sendMessage('Session commands require admin access.');
+      await deps.sendMessage("Session commands require admin access.");
     }
     deps.advanceCursor(cmdMsg.timestamp);
     return { handled: true, success: true };
   }
 
   // AUTHORIZED: process pre-compact messages first, then run the command
-  logger.info({ group: groupName, command }, 'Session command');
+  logger.info({ group: groupName, command }, "Session command");
 
   const cmdIndex = missedMessages.indexOf(cmdMsg);
   const preCompactMsgs = missedMessages.slice(0, cmdIndex);
@@ -95,7 +95,7 @@ export async function handleSessionCommand(opts: {
     let preOutputSent = false;
 
     const preResult = await deps.runAgent(prePrompt, async (result) => {
-      if (result.status === 'error') hadPreError = true;
+      if (result.status === "error") hadPreError = true;
       const text = resultToText(result.result);
       if (text) {
         await deps.sendMessage(text);
@@ -103,13 +103,13 @@ export async function handleSessionCommand(opts: {
       }
       // Close stdin on session-update marker — emitted after query completes,
       // so all results (including multi-result runs) are already written.
-      if (result.status === 'success' && result.result === null) {
+      if (result.status === "success" && result.result === null) {
         deps.closeStdin();
       }
     });
 
-    if (preResult === 'error' || hadPreError) {
-      logger.warn({ group: groupName }, 'Pre-compact processing failed, aborting session command');
+    if (preResult === "error" || hadPreError) {
+      logger.warn({ group: groupName }, "Pre-compact processing failed, aborting session command");
       await deps.sendMessage(`Failed to process messages before ${command}. Try again.`);
       if (preOutputSent) {
         // Output was already sent — don't retry or it will duplicate.
@@ -126,7 +126,7 @@ export async function handleSessionCommand(opts: {
 
   let hadCmdError = false;
   const cmdOutput = await deps.runAgent(command, async (result) => {
-    if (result.status === 'error') hadCmdError = true;
+    if (result.status === "error") hadCmdError = true;
     const text = resultToText(result.result);
     if (text) await deps.sendMessage(text);
   });
@@ -135,7 +135,7 @@ export async function handleSessionCommand(opts: {
   deps.advanceCursor(cmdMsg.timestamp);
   await deps.setTyping(false);
 
-  if (cmdOutput === 'error' || hadCmdError) {
+  if (cmdOutput === "error" || hadCmdError) {
     await deps.sendMessage(`${command} failed. The session is unchanged.`);
   }
 

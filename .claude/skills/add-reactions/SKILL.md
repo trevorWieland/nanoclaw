@@ -24,6 +24,7 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-reactions
 ```
 
 This deterministically:
+
 - Adds `scripts/migrate-reactions.ts` (database migration for `reactions` table with composite PK and indexes)
 - Adds `src/status-tracker.ts` (forward-only emoji state machine for message lifecycle signaling, with persistence and retry)
 - Adds `src/status-tracker.test.ts` (unit tests for StatusTracker)
@@ -61,11 +62,13 @@ npm run build
 ```
 
 Linux:
+
 ```bash
 systemctl --user restart nanoclaw
 ```
 
 macOS:
+
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```

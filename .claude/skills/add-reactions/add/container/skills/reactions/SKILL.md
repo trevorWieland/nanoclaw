@@ -51,13 +51,13 @@ mcp__nanoclaw__react_to_message(emoji: "")
 
 ## Common emoji
 
-| Emoji | When to use |
-|-------|-------------|
-| 👍 | Acknowledgment, approval |
-| ❤️ | Appreciation, love |
-| 😂 | Something funny |
-| 🔥 | Impressive, exciting |
-| 🎉 | Celebration, congrats |
-| 🙏 | Thanks, prayer |
-| ✅ | Task done, confirmed |
-| ❓ | Needs clarification |
+| Emoji | When to use              |
+| ----- | ------------------------ |
+| 👍    | Acknowledgment, approval |
+| ❤️    | Appreciation, love       |
+| 😂    | Something funny          |
+| 🔥    | Impressive, exciting     |
+| 🎉    | Celebration, congrats    |
+| 🙏    | Thanks, prayer           |
+| ✅    | Task done, confirmed     |
+| ❓    | Needs clarification      |
