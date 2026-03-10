@@ -26,10 +26,12 @@ Replaced Docker runtime with Apple Container runtime. This is a full file replac
 - Apple Container returns JSON with `{ status, configuration: { id } }` structure
 
 ### CONTAINER_HOST_GATEWAY
+
 - Set to `'192.168.64.1'` — the default gateway for Apple Container VMs to reach the host
 - Docker uses `'host.docker.internal'` which is resolved differently
 
 ### hostGatewayArgs
+
 - Returns `[]` — Apple Container provides host networking natively on macOS
 - Docker version returns `['--add-host=host.docker.internal:host-gateway']` on Linux
 

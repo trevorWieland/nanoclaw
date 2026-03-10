@@ -13,7 +13,7 @@ export const CONTAINER_RUNTIME_BIN = "container";
  * Hostname containers use to reach the host machine.
  * Apple Container VMs access the host via the default gateway (192.168.64.1).
  */
-export const CONTAINER_HOST_GATEWAY = '192.168.64.1';
+export const CONTAINER_HOST_GATEWAY = "192.168.64.1";
 
 /**
  * CLI args needed for the container to resolve the host gateway.

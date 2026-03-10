@@ -74,6 +74,7 @@ Messages and task operations are verified against group identity:
 Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
 
 **How it works:**
+
 1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
 2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
 3. The SDK sends API requests to the proxy with the placeholder key

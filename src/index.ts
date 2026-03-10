@@ -444,10 +444,7 @@ async function main(): Promise<void> {
   loadState();
 
   // Start credential proxy (containers route API calls through this)
-  const proxyServer = await startCredentialProxy(
-    CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
-  );
+  const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
