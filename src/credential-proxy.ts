@@ -28,10 +28,6 @@ import { logger } from "./logger.js";
 
 export type AuthMode = "api-key" | "oauth";
 
-export interface ProxyConfig {
-  authMode: AuthMode;
-}
-
 /**
  * Refresh an OAuth token using the standard OAuth2 refresh_token grant.
  * Updates the credentials file on success so other processes benefit.
@@ -88,7 +84,11 @@ function resolveOAuthToken(envToken: string | undefined): string | undefined {
   if (envToken) return envToken;
 
   // Fall back to credentials file (short-lived /login token)
-  const credentialsPath = path.join(process.env.HOME || "/home/node", ".claude", ".credentials.json");
+  const credentialsPath = path.join(
+    process.env.HOME || "/home/node",
+    ".claude",
+    ".credentials.json",
+  );
   try {
     const creds = JSON.parse(fs.readFileSync(credentialsPath, "utf-8"));
     const oauth = creds.claudeAiOauth;
