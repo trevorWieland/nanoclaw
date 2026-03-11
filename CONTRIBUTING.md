@@ -40,3 +40,8 @@ Your skill should contain the **instructions** Claude follows to add the feature
 
 - Test your skill or doc workflow on a fresh clone before submitting.
 - For fork-specific docs changes, verify links and cross-doc consistency.
+
+## Docs Terminology Consistency
+
+- Use `friends/family` (plural) when describing this fork's remix audience.
+- Keep `Fork-specific note` capitalization/punctuation consistent when adding callouts in docs.

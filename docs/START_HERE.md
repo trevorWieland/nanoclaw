@@ -28,7 +28,7 @@ This guide helps you answer two questions quickly:
 
 ## Fast Decision: Fork This Repo or Upstream?
 
-- Choose this fork if you want Trevor's opinionated docs overlays and a friend/family remix starting point.
+- Choose this fork if you want Trevor's opinionated docs overlays and a friends/family remix starting point.
 - Choose upstream if you want the canonical project baseline with minimal fork-specific guidance.
 
 If you start here and later want a cleaner baseline, you can switch to upstream using the sync flow in [FORK_SYNC.md](./FORK_SYNC.md).
