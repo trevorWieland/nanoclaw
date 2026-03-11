@@ -363,8 +363,9 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Paths are absolute (required for container mounts)
 const PROJECT_ROOT = process.cwd();
+const CONFIG_ROOT = path.resolve(process.env.NANOCLAW_CONFIG_ROOT || PROJECT_ROOT);
 export const STORE_DIR = path.resolve(PROJECT_ROOT, "store");
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, "groups");
+export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
 export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
 
 // Container configuration
@@ -380,7 +381,10 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, "i");
 ```
 
-**Note:** Paths must be absolute for container volume mounts to work correctly.
+**Notes:**
+
+- Paths must be absolute for container volume mounts to work correctly.
+- `NANOCLAW_CONFIG_ROOT` lets runtime load `.env` and `groups/` from a directory outside the code repo root.
 
 ### Container Configuration
 
@@ -413,7 +417,12 @@ Additional mounts appear at `/workspace/extra/{containerPath}` inside the contai
 
 ### Claude Authentication
 
-Configure authentication in a `.env` file in the project root. Two options:
+Configure authentication in `.env` under the runtime config root:
+
+- Default: `${PROJECT_ROOT}/.env`
+- Override: `${NANOCLAW_CONFIG_ROOT}/.env`
+
+Two options:
 
 **Option 1: Claude Subscription (OAuth token)**
 
@@ -469,7 +478,7 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 | Level      | Location                  | Read By    | Written By | Purpose                                                     |
 | ---------- | ------------------------- | ---------- | ---------- | ----------------------------------------------------------- |
-| **Global** | `groups/CLAUDE.md`        | All groups | Main only  | Preferences, facts, context shared across all conversations |
+| **Global** | `groups/global/CLAUDE.md` | All groups | Main only  | Preferences, facts, context shared across all conversations |
 | **Group**  | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory                 |
 | **Files**  | `groups/{name}/*.md`      | That group | That group | Notes, research, documents created during conversation      |
 
@@ -599,11 +608,17 @@ When `DISCORD_ADMIN_USER_ID` is configured, Discord channel handler supports:
 
 | Command                 | Example                 | Effect                                                      |
 | ----------------------- | ----------------------- | ----------------------------------------------------------- |
-| `!restart`              | `!restart`              | Restart NanoClaw service on host (admin-only)               |
+| `!restart`              | `!restart`              | Attempt restart via detected service manager (admin-only)   |
 | `!purge`                | `!purge 50`             | Bulk-delete recent messages in current channel (admin-only) |
 | `!purge since midnight` | `!purge since midnight` | Delete messages since local midnight (admin-only)           |
 
 These are host-side maintenance commands and are not available through generic channel command parsing.
+
+`!restart` behavior is supervisor-dependent:
+
+- macOS: `launchctl kickstart -k gui/<uid>/com.nanoclaw`
+- Linux/systemd: `systemctl --user restart nanoclaw` (or system-level command when running as root)
+- unsupported supervisors: command reports unsupported instead of claiming restart success
 
 ---
 

@@ -46,6 +46,15 @@ Run:
 
 Add tests alongside behavioral changes, especially around routing, container isolation, auth, and scheduler logic.
 
+## Sandbox & Execution Notes
+
+When running through a restricted sandbox, test results may be non-authoritative due to blocked network/process/system interfaces (for example `EPERM` on local listeners or OS interface inspection).  
+For authoritative verification in this repo, run tests/checks with escalated permissions outside sandbox restrictions.
+
+- Preferred authoritative test command: `pnpm run test`
+- Preferred authoritative full CI command: `pnpm run check`
+- If a sandbox run fails, explicitly log that the failure may be sandbox-induced and re-run escalated before concluding regression.
+
 ## Commit & Pull Request Guidelines
 
 Recent history follows Conventional Commit style (`fix:`, `feat:`, `chore:`, `docs:`, `style:`). Keep commits scoped and imperative.

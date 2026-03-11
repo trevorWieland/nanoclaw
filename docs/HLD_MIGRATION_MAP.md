@@ -1,12 +1,12 @@
 # HLD Migration Map
 
-This file maps content from the retired `nanoclaw-hld.md` into canonical docs so information remains traceable.
+This file maps retired HLD content into canonical docs so information remains traceable.
 
 ## Status
 
-- Source doc: `nanoclaw-hld.md`
+- Source material: retired HLD draft content (not tracked as a file in this fork)
 - Migration target: canonical docs listed below
-- Retirement intent: delete source HLD after this map and destination docs stay current
+- Retirement intent: preserve section-level mapping here while destination docs stay current
 
 ## Section Mapping
 

@@ -9,6 +9,8 @@ Keep two repos/directories:
 - **Fork code repo (public):** NanoClaw runtime code, docs, templates
 - **Assistant config repo (private):** group definitions, memory files, schedules, sensitive local conventions
 
+This fork does not track live `groups/` contents in git. Group folders and `CLAUDE.md` files are installation-specific runtime state.
+
 Benefits:
 
 - Pull upstream and fork updates with less conflict risk
@@ -21,7 +23,7 @@ Benefits:
 nanoclaw/                          # Fork code repo (public)
 ├── src/
 ├── docs/
-├── groups/global/CLAUDE.md        # Template/reference only
+├── config-examples/
 └── ...
 
 your-assistant-config/             # Private config repo
@@ -40,11 +42,29 @@ your-assistant-config/             # Private config repo
 └── runtime-overrides/             # Optional platform/channel mappings
 ```
 
+### Runtime Wiring (Required)
+
+NanoClaw runtime still starts from the code repo directory, but config can be loaded from elsewhere.
+
+- Default behavior: `.env` and `groups/` are loaded from the code repo root (`process.cwd()`).
+- External config behavior: set `NANOCLAW_CONFIG_ROOT=/absolute/path/to/your-assistant-config`.
+  - `.env` is loaded from `${NANOCLAW_CONFIG_ROOT}/.env`
+  - groups are loaded from `${NANOCLAW_CONFIG_ROOT}/groups`
+
+Example:
+
+```bash
+cd ~/nanoclaw
+NANOCLAW_CONFIG_ROOT=~/your-assistant-config pnpm run start
+```
+
+If you use launchd/systemd, set `NANOCLAW_CONFIG_ROOT` in the service environment so restarts keep the same config root.
+
 ## Group Model
 
 - **Main group (`isMain: true`)**: coordinator, global visibility, cross-group task management
 - **Non-main groups**: scoped contexts for domain tasks, shared channels, or social workflows
-- **Global identity (`groups/global/CLAUDE.md`)**: shared voice and baseline policy, read-only in non-main groups
+- **Global identity (`<config-root>/groups/global/CLAUDE.md`)**: shared voice and baseline policy, read-only in non-main groups
 
 For trust boundaries and permissions, see [SECURITY.md](./SECURITY.md).
 
