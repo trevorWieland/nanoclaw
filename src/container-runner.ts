@@ -1,6 +1,11 @@
 /**
- * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Container execution and mount orchestration.
+ * Docs map:
+ * - docs/SPEC.md#architecture
+ * - docs/SPEC.md#configuration
+ * - docs/SECURITY.md#2-mount-security
+ * Fork-specific rationale:
+ * - Main-group project mount stays read-only so agents cannot rewrite host code.
  */
 import { ChildProcess, exec, spawn } from "child_process";
 import fs from "fs";

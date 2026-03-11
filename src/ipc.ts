@@ -1,3 +1,12 @@
+/**
+ * File-based IPC watcher and authorization gate for container actions.
+ * Docs map:
+ * - docs/SPEC.md#mcp-servers
+ * - docs/SPEC.md#scheduled-tasks
+ * - docs/SECURITY.md#4-ipc-authorization
+ * Fork-specific rationale:
+ * - IPC actions are constrained by source-group identity before execution.
+ */
 import fs from "fs";
 import path from "path";
 

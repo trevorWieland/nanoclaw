@@ -16,6 +16,34 @@ Using Claude Code, NanoClaw can dynamically rewrite its code to customize its fe
 
 **New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
 
+## About This Fork (`trevorWieland/nanoclaw`)
+
+This repository is Trevor Wieland's personal public fork of upstream [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
+
+**Upstream NanoClaw behavior (general concepts):**
+
+- Single-process Node.js orchestrator
+- Container-isolated Claude agent execution
+- Per-group memory, scheduling, and channel routing
+
+**Fork-specific behavior in this repo:**
+
+- Documentation is optimized for personal remixing by friends/family
+- Architecture/security/spec docs include explicit "Fork-specific note" overlays
+- Contribution policy here favors fork docs and minor personal adjustments, while substantial product work is routed upstream
+
+**Who this fork is for:**
+
+- Friends/family who want a practical starting fork they can safely remix
+- Readers who want to learn NanoClaw fundamentals and then decide whether to continue from this fork or from upstream
+
+**Recommended reading path:**
+
+- [docs/START_HERE.md](docs/START_HERE.md) - Guided reader journey
+- [docs/FORK_OVERVIEW.md](docs/FORK_OVERVIEW.md) - Fork philosophy and intentional divergences
+- [docs/FORK_SYNC.md](docs/FORK_SYNC.md) - Keeping this fork synced with upstream
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution policy (substantive fixes/features go to upstream)
+
 ## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
@@ -25,7 +53,7 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-gh repo fork qwibitai/nanoclaw --clone
+gh repo fork trevorWieland/nanoclaw --clone
 cd nanoclaw
 claude
 ```
@@ -33,7 +61,7 @@ claude
 <details>
 <summary>Without GitHub CLI</summary>
 
-1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
+1. Fork [trevorWieland/nanoclaw](https://github.com/trevorWieland/nanoclaw) on GitHub (click the Fork button)
 2. `git clone https://github.com/<your-username>/nanoclaw.git`
 3. `cd nanoclaw`
 4. `claude`
@@ -108,7 +136,13 @@ The codebase is small enough that Claude can safely modify it.
 
 ## Contributing
 
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+
+Substantive bug fixes, features, and broad code changes should generally be contributed to upstream [`qwibitai/nanoclaw`](https://github.com/qwibitai/nanoclaw). This fork accepts fork-specific documentation improvements, remix guidance, and minor personal adjustments.
+
 **Don't add features. Add skills.**
+
+If a skill is broadly useful for NanoClaw users, propose it to upstream [`qwibitai/nanoclaw`](https://github.com/qwibitai/nanoclaw) unless it is intentionally specific to this fork.
 
 If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
 

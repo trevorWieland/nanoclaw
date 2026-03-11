@@ -1,5 +1,7 @@
 # NanoClaw — Multi-Arm Assistant Architecture
 
+> **Fork-specific note:** This document is an operating model for `trevorWieland/nanoclaw`. It builds on core NanoClaw primitives from `docs/SPEC.md` and may include personal workflow choices not required by upstream `qwibitai/nanoclaw`.
+
 ## Vision
 
 A personal AI infrastructure that operates across multiple domains — software
@@ -86,6 +88,8 @@ rules about what it acknowledges per server.
 
 NanoClaw runs on a Linux host (native or WSL2). Each agent group gets its own
 Docker container with isolated filesystem, memory, and IPC namespace.
+
+> **Fork-specific note:** The Linux/WSL2-first framing and process-manager preferences below describe this fork's deployment style, not a mandatory upstream requirement.
 
 ### Key infrastructure choices
 
@@ -183,6 +187,8 @@ Google Calendar as the primary, subscribing to other calendar sources
 (work calendar via ICS feed, phone sync). One unified calendar the agent
 reads via Google Calendar API/MCP.
 
+> **Fork-specific note:** This calendar strategy is an implementation choice for this fork's personal assistant workflow.
+
 ### Access model
 
 The coordinator gets full read access: event titles, descriptions, attendees,
@@ -206,6 +212,8 @@ see "user is busy until 3 PM" — not meeting details.
 
 Manage software development workflows for any GitHub project. Follows a
 structured pipeline: shape spec -> implement -> audit -> demo -> walk -> PR.
+
+> **Fork-specific note:** The orchestration pipeline and worker-manager split here are fork-local operating conventions layered on top of the base NanoClaw runtime.
 
 ### Components
 

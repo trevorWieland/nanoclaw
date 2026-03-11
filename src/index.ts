@@ -1,3 +1,12 @@
+/**
+ * NanoClaw host orchestrator.
+ * Docs map:
+ * - docs/SPEC.md#message-flow
+ * - docs/SPEC.md#deployment
+ * - docs/ARCHITECTURE.md#3-multi-channel-pattern
+ * Fork-specific rationale:
+ * - Maintains main/non-main group boundaries described in docs/FORK_OVERVIEW.md.
+ */
 import fs from "fs";
 import path from "path";
 

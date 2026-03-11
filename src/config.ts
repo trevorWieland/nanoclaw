@@ -1,3 +1,10 @@
+/**
+ * Central runtime constants and path/security defaults.
+ * Docs map:
+ * - docs/SPEC.md#configuration
+ * - docs/SECURITY.md#2-mount-security
+ * - docs/FORK_OVERVIEW.md
+ */
 import os from "os";
 import path from "path";
 
