@@ -1,5 +1,7 @@
 # NanoClaw Security Model
 
+> **Fork-specific note:** This document describes the hardening profile implemented in `trevorWieland/nanoclaw`. Upstream concepts are preserved, but control details can differ across forks.
+
 ## Trust Model
 
 | Entity            | Trust Level | Rationale                        |
@@ -23,6 +25,8 @@ Agents execute in containers (lightweight Linux VMs), providing:
 This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
 
 ### 2. Mount Security
+
+> **Fork-specific note:** External allowlist location and the project-root read-only mounting strategy are intentional security choices in this fork.
 
 **External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
 
@@ -70,6 +74,8 @@ Messages and task operations are verified against group identity:
 | Manage other groups         | ✓          | ✗              |
 
 ### 5. Credential Isolation (Credential Proxy)
+
+> **Fork-specific note:** The credential proxy flow and placeholder key strategy are implementation details of this fork's runtime wiring.
 
 Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
 

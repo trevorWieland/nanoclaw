@@ -2,6 +2,8 @@
 
 A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
 
+> **Fork-specific note:** This spec documents the implementation currently used in `trevorWieland/nanoclaw`. Core concepts apply broadly, but some defaults and operational choices are fork-local overlays on upstream `qwibitai/nanoclaw`.
+
 ---
 
 ## Table of Contents
@@ -330,6 +332,8 @@ nanoclaw/
 
 Configuration constants are in `src/config.ts`:
 
+> **Fork-specific note:** Default values such as assistant name, path layout, and mount/auth handling in this section reflect this fork's defaults and may differ from other forks or future upstream revisions.
+
 ```typescript
 import path from "path";
 
@@ -651,6 +655,8 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 
 NanoClaw runs as a single macOS launchd service.
 
+> **Fork-specific note:** The launchd-centric deployment flow here is this fork's primary operating path; upstream users may deploy with different supervisors or startup wiring.
+
 ### Startup Sequence
 
 When NanoClaw starts, it:
@@ -727,6 +733,8 @@ tail -f logs/nanoclaw.log
 ---
 
 ## Security Considerations
+
+> **Fork-specific note:** Security controls here include fork-local hardening choices (for example, project-root read-only mounting and credential proxy usage patterns) in addition to general NanoClaw isolation principles.
 
 ### Container Isolation
 

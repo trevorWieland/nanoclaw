@@ -1,3 +1,9 @@
+/**
+ * Message formatting and outbound channel routing.
+ * Docs map:
+ * - docs/SPEC.md#message-flow
+ * - docs/SPEC.md#commands
+ */
 import { Channel, NewMessage } from "./types.js";
 import { formatLocalTime } from "./timezone.js";
 
