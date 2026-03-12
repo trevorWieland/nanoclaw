@@ -319,7 +319,8 @@ nanoclaw/
 │       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
 │
 ├── groups/
-│   ├── CLAUDE.md                  # Global memory (all groups read this)
+│   ├── global/
+│   │   └── CLAUDE.md              # Global memory (all groups read this)
 │   ├── {channel}_main/             # Main control channel (e.g., whatsapp_main/)
 │   │   ├── CLAUDE.md              # Main channel memory
 │   │   └── logs/                  # Task execution logs
@@ -485,14 +486,13 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
 ### How Memory Works
 
 1. **Agent Context Loading**
-   - Agent runs with `cwd` set to `groups/{group-name}/`
-   - Claude Agent SDK with `settingSources: ['project']` automatically loads:
-     - `../CLAUDE.md` (parent directory = global memory)
-     - `./CLAUDE.md` (current directory = group memory)
+   - Agent runs with `cwd` set to its group directory (`/workspace/group` in the container).
+   - Claude Agent SDK with `settingSources: ['project']` loads `./CLAUDE.md` for group memory.
+   - For non-main groups, host runtime mounts `groups/global/` at `/workspace/global` read-only and appends `/workspace/global/CLAUDE.md` as shared system context.
 
 2. **Writing Memory**
    - When user says "remember this", agent writes to `./CLAUDE.md`
-   - When user says "remember this globally" (main channel only), agent writes to `../CLAUDE.md`
+   - When user says "remember this globally" (main channel only), agent writes to `groups/global/CLAUDE.md`
    - Agent can create files like `notes.md`, `research.md` in the group folder
 
 3. **Main Channel Privileges**

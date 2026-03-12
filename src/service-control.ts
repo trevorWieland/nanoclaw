@@ -1,8 +1,10 @@
-import { exec } from "child_process";
+import { spawn } from "child_process";
 import fs from "fs";
 import os from "os";
 
 export type RestartManager = "launchd" | "systemd-user" | "systemd-system" | "none";
+export const RESTART_COMMAND_TIMEOUT_MS = 30_000;
+const SAFE_RESTART_IDENTIFIER = /^[A-Za-z0-9_.:@-]+$/;
 
 export interface RestartPlanOptions {
   platform?: NodeJS.Platform;
@@ -14,7 +16,7 @@ export interface RestartPlanOptions {
 
 export interface RestartPlan {
   manager: RestartManager;
-  command: string | null;
+  command: RestartCommand | null;
   reason?: string;
 }
 
@@ -32,6 +34,24 @@ function detectSystemdOnLinux(): boolean {
   }
 }
 
+export interface RestartCommand {
+  bin: string;
+  args: string[];
+  display: string;
+}
+
+function invalidRestartConfigReason(envVar: string, value: string): string {
+  return `invalid ${envVar} value "${value}" (allowed chars: letters, numbers, ., _, :, @, -)`;
+}
+
+function toNone(reason: string): RestartPlan {
+  return {
+    manager: "none",
+    command: null,
+    reason,
+  };
+}
+
 export function getRestartPlan(options: RestartPlanOptions = {}): RestartPlan {
   const platform = options.platform ?? os.platform();
   const uid = options.uid ?? process.getuid?.() ?? null;
@@ -41,49 +61,60 @@ export function getRestartPlan(options: RestartPlanOptions = {}): RestartPlan {
 
   if (platform === "darwin") {
     if (uid == null) {
-      return {
-        manager: "none",
-        command: null,
-        reason: "launchd restart requires a numeric uid",
-      };
+      return toNone("launchd restart requires a numeric uid");
+    }
+
+    if (!SAFE_RESTART_IDENTIFIER.test(launchdLabel)) {
+      return toNone(invalidRestartConfigReason("NANOCLAW_LAUNCHD_LABEL", launchdLabel));
     }
 
     return {
       manager: "launchd",
-      command: `launchctl kickstart -k gui/${uid}/${launchdLabel}`,
+      command: {
+        bin: "launchctl",
+        args: ["kickstart", "-k", `gui/${uid}/${launchdLabel}`],
+        display: `launchctl kickstart -k gui/${uid}/${launchdLabel}`,
+      },
     };
   }
 
   if (platform === "linux") {
+    if (!SAFE_RESTART_IDENTIFIER.test(serviceName)) {
+      return toNone(invalidRestartConfigReason("NANOCLAW_SERVICE_NAME", serviceName));
+    }
+
     if (!hasSystemd) {
-      return {
-        manager: "none",
-        command: null,
-        reason: "systemd not detected on this host",
-      };
+      return toNone("systemd not detected on this host");
     }
 
     if (uid === 0) {
       return {
         manager: "systemd-system",
-        command: `systemctl restart ${serviceName}`,
+        command: {
+          bin: "systemctl",
+          args: ["restart", serviceName],
+          display: `systemctl restart ${serviceName}`,
+        },
       };
     }
 
     return {
       manager: "systemd-user",
-      command: `systemctl --user restart ${serviceName}`,
+      command: {
+        bin: "systemctl",
+        args: ["--user", "restart", serviceName],
+        display: `systemctl --user restart ${serviceName}`,
+      },
     };
   }
 
-  return {
-    manager: "none",
-    command: null,
-    reason: `unsupported platform: ${platform}`,
-  };
+  return toNone(`unsupported platform: ${platform}`);
 }
 
-export async function restartNanoClawService(plan = getRestartPlan()): Promise<RestartResult> {
+export async function restartNanoClawService(
+  plan = getRestartPlan(),
+  timeoutMs = RESTART_COMMAND_TIMEOUT_MS,
+): Promise<RestartResult> {
   const command = plan.command;
   if (!command) {
     return {
@@ -94,19 +125,49 @@ export async function restartNanoClawService(plan = getRestartPlan()): Promise<R
   }
 
   return new Promise<RestartResult>((resolve) => {
-    exec(command, (err) => {
-      if (err) {
-        resolve({
+    const child = spawn(command.bin, command.args, { stdio: "ignore" });
+    let settled = false;
+    let timeout: NodeJS.Timeout | null = null;
+    const finish = (result: RestartResult) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve(result);
+    };
+
+    timeout = setTimeout(() => {
+      if (!settled) {
+        child.kill("SIGTERM");
+        finish({
           ...plan,
           ok: false,
-          error: err.message,
+          error: `Restart command timed out after ${timeoutMs}ms: ${command.display}`,
+        });
+      }
+    }, timeoutMs);
+
+    child.once("error", (err) => {
+      finish({
+        ...plan,
+        ok: false,
+        error: err.message,
+      });
+    });
+
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        finish({
+          ...plan,
+          ok: true,
         });
         return;
       }
 
-      resolve({
+      const signalPart = signal ? `, signal ${signal}` : "";
+      finish({
         ...plan,
-        ok: true,
+        ok: false,
+        error: `Restart command exited with code ${code ?? "null"}${signalPart}`,
       });
     });
   });

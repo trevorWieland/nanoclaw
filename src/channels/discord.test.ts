@@ -27,14 +27,22 @@ vi.mock("../logger.js", () => ({
 const restartPlanRef = vi.hoisted(() => ({
   current: {
     manager: "systemd-user" as const,
-    command: "systemctl --user restart nanoclaw",
+    command: {
+      bin: "systemctl",
+      args: ["--user", "restart", "nanoclaw"],
+      display: "systemctl --user restart nanoclaw",
+    },
   },
 }));
 
 const restartResultRef = vi.hoisted(() => ({
   current: {
     manager: "systemd-user" as const,
-    command: "systemctl --user restart nanoclaw",
+    command: {
+      bin: "systemctl",
+      args: ["--user", "restart", "nanoclaw"],
+      display: "systemctl --user restart nanoclaw",
+    },
     ok: true,
   },
 }));
@@ -827,7 +835,11 @@ describe("DiscordChannel", () => {
     it("reports restart command failure to the admin", async () => {
       vi.mocked(restartNanoClawService).mockResolvedValueOnce({
         manager: "systemd-user",
-        command: "systemctl --user restart nanoclaw",
+        command: {
+          bin: "systemctl",
+          args: ["--user", "restart", "nanoclaw"],
+          display: "systemctl --user restart nanoclaw",
+        },
         ok: false,
         error: "permission denied",
       });
@@ -849,6 +861,38 @@ describe("DiscordChannel", () => {
       expect(sendSpy).toHaveBeenNthCalledWith(
         2,
         "Restart failed via systemd-user: permission denied",
+      );
+    });
+
+    it("reports restart timeout failure to the admin", async () => {
+      vi.mocked(restartNanoClawService).mockResolvedValueOnce({
+        manager: "systemd-user",
+        command: {
+          bin: "systemctl",
+          args: ["--user", "restart", "nanoclaw"],
+          display: "systemctl --user restart nanoclaw",
+        },
+        ok: false,
+        error: "Restart command timed out after 30000ms: systemctl --user restart nanoclaw",
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts, "admin-user");
+      await channel.connect();
+
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const msg = createMessage({
+        authorId: "admin-user",
+        content: "!restart",
+        guildName: "Server",
+        send: sendSpy,
+      });
+      await triggerMessage(msg);
+
+      expect(sendSpy).toHaveBeenNthCalledWith(1, "Attempting restart via systemd-user...");
+      expect(sendSpy).toHaveBeenNthCalledWith(
+        2,
+        "Restart failed via systemd-user: Restart command timed out after 30000ms: systemctl --user restart nanoclaw",
       );
     });
   });
