@@ -42,6 +42,17 @@ export function formatMessagesWithCap(
   return `<note>${omitted} older messages omitted for context window</note>\n${formatMessages(kept, timezone)}`;
 }
 
+export function anchorTriggerWindow(
+  messageCount: number,
+  triggerIdx: number,
+  maxMessages: number,
+): { start: number; end: number; truncated: boolean } {
+  if (messageCount <= maxMessages) return { start: 0, end: messageCount, truncated: false };
+  const end = Math.min(messageCount, triggerIdx + maxMessages);
+  const start = end - maxMessages;
+  return { start, end, truncated: end < messageCount };
+}
+
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, "").trim();
 }

@@ -52,7 +52,13 @@ import {
 import { GroupQueue } from "./group-queue.js";
 import { resolveGroupFolderPath } from "./group-folder.js";
 import { startIpcWatcher } from "./ipc.js";
-import { findChannel, formatMessages, formatMessagesWithCap, formatOutbound } from "./router.js";
+import {
+  anchorTriggerWindow,
+  findChannel,
+  formatMessages,
+  formatMessagesWithCap,
+  formatOutbound,
+} from "./router.js";
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -171,10 +177,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (triggerIdx < 0) return true;
-    // Anchor the prompt window at the earliest trigger so it's guaranteed
-    // to be in-context. Messages beyond MAX_PROMPT_MESSAGES stay pending
-    // and will be picked up on the next run.
-    missedMessages = missedMessages.slice(triggerIdx, triggerIdx + MAX_PROMPT_MESSAGES);
+    const total = missedMessages.length;
+    const { start, end, truncated } = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
+    missedMessages = missedMessages.slice(start, end);
+    // Re-enqueue so tail messages are checked for additional triggers
+    if (truncated) {
+      queue.enqueueMessageCheck(chatJid);
+    }
   }
 
   const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES);

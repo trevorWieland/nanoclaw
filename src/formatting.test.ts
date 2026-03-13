@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from "./config.js";
 import {
+  anchorTriggerWindow,
   escapeXml,
   formatMessages,
   formatMessagesWithCap,
@@ -310,5 +311,45 @@ describe("formatMessagesWithCap", () => {
     const withoutParam = formatMessagesWithCap(msgs, TZ, 10);
     const withUndefined = formatMessagesWithCap(msgs, TZ, 10, undefined);
     expect(withoutParam).toBe(withUndefined);
+  });
+});
+
+// --- anchorTriggerWindow ---
+
+describe("anchorTriggerWindow", () => {
+  it("returns full range when under cap", () => {
+    expect(anchorTriggerWindow(100, 60, 200)).toEqual({ start: 0, end: 100, truncated: false });
+  });
+
+  it("preserves pre-trigger context when trigger is in tail", () => {
+    expect(anchorTriggerWindow(300, 250, 200)).toEqual({ start: 100, end: 300, truncated: false });
+  });
+
+  it("anchors at trigger when trigger is before tail", () => {
+    expect(anchorTriggerWindow(300, 50, 200)).toEqual({ start: 50, end: 250, truncated: true });
+  });
+
+  it("handles large overflow with early trigger", () => {
+    expect(anchorTriggerWindow(500, 10, 200)).toEqual({ start: 10, end: 210, truncated: true });
+  });
+
+  it("handles trigger at index 0", () => {
+    expect(anchorTriggerWindow(500, 0, 200)).toEqual({ start: 0, end: 200, truncated: true });
+  });
+
+  it("handles trigger at last index", () => {
+    expect(anchorTriggerWindow(300, 299, 200)).toEqual({ start: 100, end: 300, truncated: false });
+  });
+
+  it("no truncation when exactly at cap", () => {
+    expect(anchorTriggerWindow(200, 100, 200)).toEqual({ start: 0, end: 200, truncated: false });
+  });
+
+  it("truncates when one over cap", () => {
+    expect(anchorTriggerWindow(201, 0, 200)).toEqual({ start: 0, end: 200, truncated: true });
+  });
+
+  it("trigger exactly at total-max boundary", () => {
+    expect(anchorTriggerWindow(300, 100, 200)).toEqual({ start: 100, end: 300, truncated: false });
   });
 });
