@@ -355,6 +355,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  tanrenMcpPath?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -464,8 +465,7 @@ async function runQuery(
             },
           },
         };
-        if (containerInput.isMain && containerInput.tanren) {
-          const tanrenMcpPath = path.join(__dirname, "tanren-mcp-stdio.js");
+        if (containerInput.isMain && containerInput.tanren && tanrenMcpPath) {
           servers.tanren = {
             command: "node",
             args: [tanrenMcpPath],
@@ -554,6 +554,7 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, "ipc-mcp-stdio.js");
+  const tanrenMcpPath = path.join(__dirname, "tanren-mcp-stdio.js");
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -589,6 +590,7 @@ async function main(): Promise<void> {
         containerInput,
         sdkEnv,
         resumeAt,
+        tanrenMcpPath,
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
