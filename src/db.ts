@@ -278,6 +278,35 @@ export function getMessagesSince(
   return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function getAllMessagesSince(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+  batchSize: number = 200,
+): NewMessage[] {
+  // Drain loop using ASC ordering so we page forward from the cursor,
+  // unlike getMessagesSince which returns the N most-recent (DESC).
+  const sql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp
+    LIMIT ?
+  `;
+  const all: NewMessage[] = [];
+  let cursor = sinceTimestamp;
+  while (true) {
+    const batch = db.prepare(sql).all(chatJid, cursor, `${botPrefix}:%`, batchSize) as NewMessage[];
+    if (batch.length === 0) break;
+    all.push(...batch);
+    cursor = batch[batch.length - 1].timestamp;
+    if (batch.length < batchSize) break;
+  }
+  return all;
+}
+
 export function createTask(task: Omit<ScheduledTask, "last_run" | "last_result">): void {
   db.prepare(
     `

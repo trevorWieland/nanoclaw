@@ -27,6 +27,19 @@ export function formatMessages(messages: NewMessage[], timezone: string): string
   return `${header}<messages>\n${lines.join("\n")}\n</messages>`;
 }
 
+export function formatMessagesWithCap(
+  messages: NewMessage[],
+  timezone: string,
+  maxMessages: number = 200,
+): string {
+  if (messages.length <= maxMessages) {
+    return formatMessages(messages, timezone);
+  }
+  const omitted = messages.length - maxMessages;
+  const kept = messages.slice(-maxMessages);
+  return `<note>${omitted} older messages omitted for context window</note>\n${formatMessages(kept, timezone)}`;
+}
+
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, "").trim();
 }

@@ -5,6 +5,7 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllMessagesSince,
   getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
@@ -408,6 +409,59 @@ describe("message query LIMIT", () => {
   it("returns all messages when count is under the limit", () => {
     const { messages } = getNewMessages(["group@g.us"], "2024-01-01T00:00:00.000Z", "Andy", 50);
     expect(messages).toHaveLength(10);
+  });
+});
+
+// --- getAllMessagesSince (drain loop) ---
+
+describe("getAllMessagesSince", () => {
+  beforeEach(() => {
+    storeChatMetadata("group@g.us", "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 10; i++) {
+      store({
+        id: `drain-${i}`,
+        chat_jid: "group@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+  });
+
+  it("drains all messages across multiple batches", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(10);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[9].content).toBe("message 10");
+  });
+
+  it("returns empty array when no messages exist", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T01:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(0);
+  });
+
+  it("handles count exactly equal to batchSize", () => {
+    // 10 messages with batchSize 5 → two full batches
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:04.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(6);
+    expect(msgs[0].content).toBe("message 5");
+    expect(msgs[5].content).toBe("message 10");
+  });
+
+  it("single batch when under batchSize", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:08.000Z", "Andy", 200);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toBe("message 9");
+    expect(msgs[1].content).toBe("message 10");
+  });
+
+  it("preserves chronological order across batches", () => {
+    const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    for (let i = 1; i < msgs.length; i++) {
+      expect(msgs[i].timestamp > msgs[i - 1].timestamp).toBe(true);
+    }
   });
 });
 

@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from "./config.js";
-import { escapeXml, formatMessages, formatOutbound, stripInternalTags } from "./router.js";
+import {
+  escapeXml,
+  formatMessages,
+  formatMessagesWithCap,
+  formatOutbound,
+  stripInternalTags,
+} from "./router.js";
 import { NewMessage } from "./types.js";
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
@@ -236,5 +242,50 @@ describe("trigger gating (requiresTrigger interaction)", () => {
   it("non-main group with requiresTrigger=false always processes (no trigger needed)", () => {
     const msgs = [makeMsg({ content: "hello no trigger" })];
     expect(shouldProcess(false, false, msgs)).toBe(true);
+  });
+});
+
+// --- formatMessagesWithCap ---
+
+describe("formatMessagesWithCap", () => {
+  const TZ = "UTC";
+
+  function makeMsgs(count: number): NewMessage[] {
+    return Array.from({ length: count }, (_, i) =>
+      makeMsg({
+        id: `cap-${i}`,
+        sender_name: `User${i}`,
+        content: `msg ${i}`,
+        timestamp: `2024-01-01T00:${String(i).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+  }
+
+  it("passes through when under cap", () => {
+    const msgs = makeMsgs(3);
+    expect(formatMessagesWithCap(msgs, TZ, 10)).toBe(formatMessages(msgs, TZ));
+  });
+
+  it("truncates to most recent N when over cap", () => {
+    const msgs = makeMsgs(10);
+    const result = formatMessagesWithCap(msgs, TZ, 3);
+    // Should contain only the last 3 messages
+    expect(result).toContain("msg 7");
+    expect(result).toContain("msg 8");
+    expect(result).toContain("msg 9");
+    expect(result).not.toContain("msg 0");
+    expect(result).not.toContain("msg 6");
+  });
+
+  it("includes omission note when truncating", () => {
+    const msgs = makeMsgs(10);
+    const result = formatMessagesWithCap(msgs, TZ, 3);
+    expect(result).toContain("<note>7 older messages omitted for context window</note>");
+  });
+
+  it("no note when under cap", () => {
+    const msgs = makeMsgs(3);
+    const result = formatMessagesWithCap(msgs, TZ, 10);
+    expect(result).not.toContain("<note>");
   });
 });
