@@ -35,7 +35,7 @@ import {
 } from "./container-runtime.js";
 import {
   getAllChats,
-  countMessagesSince,
+  getAllMessagesSince,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -158,16 +158,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || "";
-  const totalPending = countMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const missedMessages = getAllMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
-  if (totalPending === 0) return true;
-
-  const missedMessages = getMessagesSince(
-    chatJid,
-    sinceTimestamp,
-    ASSISTANT_NAME,
-    MAX_PROMPT_MESSAGES,
-  );
+  if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -180,7 +173,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES, totalPending);
+  const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -404,26 +397,13 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
-          const pendingCount = countMessagesSince(
+          const allPending = getAllMessagesSince(
             chatJid,
             lastAgentTimestamp[chatJid] || "",
             ASSISTANT_NAME,
           );
-          const messagesToSend =
-            pendingCount > 0
-              ? getMessagesSince(
-                  chatJid,
-                  lastAgentTimestamp[chatJid] || "",
-                  ASSISTANT_NAME,
-                  MAX_PROMPT_MESSAGES,
-                )
-              : groupMessages;
-          const formatted = formatMessagesWithCap(
-            messagesToSend,
-            TIMEZONE,
-            MAX_PROMPT_MESSAGES,
-            pendingCount > 0 ? pendingCount : undefined,
-          );
+          const messagesToSend = allPending.length > 0 ? allPending : groupMessages;
+          const formatted = formatMessagesWithCap(messagesToSend, TIMEZONE, MAX_PROMPT_MESSAGES);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(

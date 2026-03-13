@@ -278,20 +278,6 @@ export function getMessagesSince(
   return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
-export function countMessagesSince(
-  chatJid: string,
-  sinceTimestamp: string,
-  botPrefix: string,
-): number {
-  const sql = `
-    SELECT COUNT(*) as cnt FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-  `;
-  return (db.prepare(sql).get(chatJid, sinceTimestamp, `${botPrefix}:%`) as { cnt: number }).cnt;
-}
-
 export function getAllMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
