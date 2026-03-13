@@ -1,26 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// We test the tanren MCP server by validating its tool registration and fetch behavior.
-// Since the server is a standalone process that reads env vars at module level,
-// we test the core logic patterns rather than importing the module directly.
+// Mock container-only dependencies that aren't installed in the root project
+vi.mock("@modelcontextprotocol/sdk/server/mcp.js", () => ({ McpServer: vi.fn() }));
+vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({ StdioServerTransport: vi.fn() }));
+vi.mock("zod", () => ({
+  z: {
+    string: () => ({ describe: () => ({}), optional: () => ({ describe: () => ({}) }) }),
+    number: () => ({ describe: () => ({}), optional: () => ({ describe: () => ({}) }) }),
+  },
+}));
+
+import { TOOL_NAMES, tanrenFetch, ok, err } from "../src/tanren-mcp-stdio.js";
 
 describe("tanren-mcp-stdio — tool definitions", () => {
-  const TOOL_NAMES = [
-    "tanren_health",
-    "tanren_dispatch",
-    "tanren_dispatch_status",
-    "tanren_cancel",
-    "tanren_provision",
-    "tanren_execute",
-    "tanren_teardown",
-    "tanren_run_full",
-    "tanren_run_status",
-    "tanren_vm_list",
-    "tanren_vm_release",
-    "tanren_config",
-    "tanren_events",
-  ];
-
   it("defines exactly 13 tools", () => {
     expect(TOOL_NAMES).toHaveLength(13);
   });
@@ -42,38 +34,6 @@ describe("tanren-mcp-stdio — tanrenFetch logic", () => {
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
-
-  // Simulate the tanrenFetch function inline since we can't import it
-  async function tanrenFetch(
-    apiUrl: string,
-    apiKey: string,
-    method: string,
-    path: string,
-    body?: unknown,
-  ) {
-    const res = await fetch(`${apiUrl}${path}`, {
-      method,
-      headers: {
-        "x-api-key": apiKey,
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30_000),
-    });
-    const text = await res.text();
-    let data: unknown;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
-    if (!res.ok) {
-      throw new Error(
-        `Tanren API ${res.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`,
-      );
-    }
-    return data;
-  }
 
   it("returns parsed JSON on success", async () => {
     const body = { status: "ok", version: "0.1.0" };
@@ -155,15 +115,6 @@ describe("tanren-mcp-stdio — tanrenFetch logic", () => {
 });
 
 describe("tanren-mcp-stdio — tool response format", () => {
-  function ok(data: unknown) {
-    return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
-  }
-
-  function err(error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { content: [{ type: "text" as const, text: message }], isError: true as const };
-  }
-
   it("ok() wraps data as JSON text content", () => {
     const result = ok({ status: "healthy" });
     expect(result.content).toHaveLength(1);

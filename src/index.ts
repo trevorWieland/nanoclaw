@@ -60,7 +60,7 @@ import {
 import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
-import { createTanrenClient, readTanrenConfig, TanrenClient } from "./tanren/index.js";
+import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
 import { Channel, NewMessage, RegisteredGroup } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -73,7 +73,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let tanrenClient: TanrenClient | null = null;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -457,20 +456,22 @@ async function main(): Promise<void> {
   logger.info("Database initialized");
   loadState();
 
-  tanrenClient = createTanrenClient();
+  const tanrenClient = createTanrenClient();
   if (tanrenClient) {
-    try {
-      const health = await tanrenClient.health();
-      logger.info(
-        { version: health.version, uptime: health.uptime_seconds },
-        "Tanren API connected",
-      );
-    } catch (err) {
-      logger.warn(
-        { err },
-        "Tanren API health check failed — tanren integration continues (API may recover)",
-      );
-    }
+    tanrenClient
+      .health()
+      .then((health) => {
+        logger.info(
+          { version: health.version, uptime: health.uptime_seconds },
+          "Tanren API connected",
+        );
+      })
+      .catch((err) => {
+        logger.warn(
+          { err },
+          "Tanren API health check failed — tanren integration continues (API may recover)",
+        );
+      });
   } else {
     logger.debug("Tanren API not configured (TANREN_API_URL / TANREN_API_KEY missing)");
   }

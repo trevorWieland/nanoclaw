@@ -163,10 +163,9 @@ describe("container-runner tanren passthrough", () => {
 
     // Read what was written to stdin
     const stdinData = (fakeProc.stdin as PassThrough).read();
-    if (stdinData) {
-      const parsed = JSON.parse(stdinData.toString());
-      expect(parsed.tanren).toEqual(tanrenConfig);
-    }
+    expect(stdinData).not.toBeNull();
+    const parsed = JSON.parse(stdinData!.toString());
+    expect(parsed.tanren).toEqual(tanrenConfig);
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);

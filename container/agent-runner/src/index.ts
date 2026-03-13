@@ -554,7 +554,11 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, "ipc-mcp-stdio.js");
-  const tanrenMcpPath = path.join(__dirname, "tanren-mcp-stdio.js");
+  const tanrenMcpCandidate = path.join(__dirname, "tanren-mcp-stdio.js");
+  const tanrenMcpPath = fs.existsSync(tanrenMcpCandidate) ? tanrenMcpCandidate : undefined;
+  if (containerInput.isMain && containerInput.tanren && !tanrenMcpPath) {
+    log("tanren-mcp-stdio.js not found — skipping tanren MCP server");
+  }
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });

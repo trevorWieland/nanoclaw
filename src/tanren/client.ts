@@ -220,9 +220,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function readTanrenConfig(): { apiUrl: string; apiKey: string } | null {
-  const baseUrl = TANREN_API_URL;
+  const env = readEnvFile(["TANREN_API_URL", "TANREN_API_KEY"]);
+  const baseUrl = env.TANREN_API_URL ?? TANREN_API_URL;
   if (!baseUrl) return null;
-  const apiKey = readEnvFile(["TANREN_API_KEY"]).TANREN_API_KEY ?? process.env.TANREN_API_KEY;
+  const apiKey = env.TANREN_API_KEY ?? process.env.TANREN_API_KEY;
   if (!apiKey) return null;
   return { apiUrl: baseUrl, apiKey };
 }
@@ -230,11 +231,11 @@ export function readTanrenConfig(): { apiUrl: string; apiKey: string } | null {
 export function createTanrenClient(overrides?: Partial<TanrenClientOptions>): TanrenClient | null {
   const { baseUrl: overrideUrl, apiKey: overrideKey, ...rest } = overrides ?? {};
 
-  const baseUrl = overrideUrl ?? TANREN_API_URL;
+  const env = readEnvFile(["TANREN_API_URL", "TANREN_API_KEY"]);
+  const baseUrl = overrideUrl ?? env.TANREN_API_URL ?? TANREN_API_URL;
   if (!baseUrl) return null;
 
-  const apiKey =
-    overrideKey ?? readEnvFile(["TANREN_API_KEY"]).TANREN_API_KEY ?? process.env.TANREN_API_KEY;
+  const apiKey = overrideKey ?? env.TANREN_API_KEY ?? process.env.TANREN_API_KEY;
   if (!apiKey) return null;
 
   return new TanrenClient({ baseUrl, apiKey, ...rest });
