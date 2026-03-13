@@ -14,11 +14,12 @@ export class TanrenAPIError extends Error {
   }
 
   static async fromResponse(res: Response, requestId?: string): Promise<TanrenAPIError> {
-    let body: unknown;
+    const raw = await res.text().catch(() => null);
+    let body: unknown = raw;
     try {
-      body = await res.json();
+      body = JSON.parse(raw!);
     } catch {
-      body = await res.text().catch(() => null);
+      // keep raw text as body
     }
 
     const message = `Tanren API ${res.status} ${res.statusText}`;

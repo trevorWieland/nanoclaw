@@ -513,4 +513,9 @@ describe("createTanrenClient — factory", () => {
     });
     expect(client).toBeInstanceOf(TanrenClient);
   });
+
+  it("ignores explicit undefined overrides and falls through to config", () => {
+    const client = createTanrenClient({ baseUrl: undefined, apiKey: undefined });
+    expect(client).toBeInstanceOf(TanrenClient);
+  });
 });

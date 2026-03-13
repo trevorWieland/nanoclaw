@@ -78,14 +78,25 @@ describe("TanrenAPIError.fromResponse", () => {
       ok: false,
       status: 500,
       statusText: "Internal Server Error",
-      json: async () => {
-        throw new Error("not json");
-      },
       text: async () => "plain text error",
     } as unknown as Response;
     const err = await TanrenAPIError.fromResponse(res);
     expect(err.status).toBe(500);
     expect(err.body).toBe("plain text error");
+  });
+
+  it("falls back to null when text() itself fails", async () => {
+    const res = {
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      text: async () => {
+        throw new Error("stream broken");
+      },
+    } as unknown as Response;
+    const err = await TanrenAPIError.fromResponse(res);
+    expect(err.status).toBe(500);
+    expect(err.body).toBeNull();
   });
 });
 

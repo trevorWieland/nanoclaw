@@ -220,14 +220,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function createTanrenClient(overrides?: Partial<TanrenClientOptions>): TanrenClient | null {
-  const baseUrl = overrides?.baseUrl ?? TANREN_API_URL;
+  const { baseUrl: overrideUrl, apiKey: overrideKey, ...rest } = overrides ?? {};
+
+  const baseUrl = overrideUrl ?? TANREN_API_URL;
   if (!baseUrl) return null;
 
   const apiKey =
-    overrides?.apiKey ??
-    readEnvFile(["TANREN_API_KEY"]).TANREN_API_KEY ??
-    process.env.TANREN_API_KEY;
+    overrideKey ?? readEnvFile(["TANREN_API_KEY"]).TANREN_API_KEY ?? process.env.TANREN_API_KEY;
   if (!apiKey) return null;
 
-  return new TanrenClient({ baseUrl, apiKey, ...overrides });
+  return new TanrenClient({ baseUrl, apiKey, ...rest });
 }
