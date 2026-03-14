@@ -261,11 +261,12 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
   limit: number = 200,
+  sinceId?: string,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   // Subquery takes the N most recent, outer query re-sorts chronologically.
-  const sql = `
+  const tsOnlySql = `
     SELECT * FROM (
       SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
       FROM messages
@@ -276,7 +277,33 @@ export function getMessagesSince(
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+  const compositeSql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND id > ?))
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+  const cursorId = sinceId || null;
+  if (cursorId !== null) {
+    return db
+      .prepare(compositeSql)
+      .all(
+        chatJid,
+        sinceTimestamp,
+        sinceTimestamp,
+        cursorId,
+        `${botPrefix}:%`,
+        limit,
+      ) as NewMessage[];
+  }
+  return db
+    .prepare(tsOnlySql)
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
 /**

@@ -198,6 +198,123 @@ describe("getMessagesSince", () => {
     const msgs = getMessagesSince("group@g.us", "2024-01-01T00:00:04.000Z", "Andy");
     expect(msgs).toHaveLength(0);
   });
+
+  it("sinceId skips same-timestamp messages at or before cursor id", () => {
+    // Use a separate chat_jid to avoid collisions with beforeEach fixtures
+    const jid = "cursor-test@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    store({
+      id: "a",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "b",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+    store({
+      id: "c",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-c",
+      timestamp: T,
+    });
+    store({
+      id: "d",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-d",
+      timestamp: T2,
+    });
+
+    const msgs = getMessagesSince(jid, T, "Andy", 200, "b");
+    expect(msgs.map((m) => m.id)).toEqual(["c", "d"]);
+  });
+
+  it("sinceId=undefined preserves backward-compatible timestamp-only behavior", () => {
+    const jid = "cursor-compat@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    store({
+      id: "a2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "b2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+    store({
+      id: "c2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-c",
+      timestamp: T,
+    });
+    store({
+      id: "d2",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-d",
+      timestamp: T2,
+    });
+
+    // No sinceId → timestamp-only → only messages strictly after T
+    const msgs = getMessagesSince(jid, T, "Andy");
+    expect(msgs.map((m) => m.id)).toEqual(["d2"]);
+  });
+
+  it("recovery probe with limit=1 and sinceId finds tied-timestamp messages", () => {
+    const jid = "cursor-recovery@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    store({
+      id: "ra",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-a",
+      timestamp: T,
+    });
+    store({
+      id: "rb",
+      chat_jid: jid,
+      sender: "u@s",
+      sender_name: "U",
+      content: "msg-b",
+      timestamp: T,
+    });
+
+    // With sinceId: finds "rb" (the bug fix)
+    const withId = getMessagesSince(jid, T, "Andy", 1, "ra");
+    expect(withId).toHaveLength(1);
+    expect(withId[0].id).toBe("rb");
+
+    // Without sinceId: misses it (the bug)
+    const withoutId = getMessagesSince(jid, T, "Andy", 1);
+    expect(withoutId).toHaveLength(0);
+  });
 });
 
 // --- getNewMessages ---

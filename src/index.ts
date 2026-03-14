@@ -460,7 +460,13 @@ async function startMessageLoop(): Promise<void> {
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const recoverCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
-    const pending = getMessagesSince(chatJid, recoverCursor.ts, ASSISTANT_NAME, 1);
+    const pending = getMessagesSince(
+      chatJid,
+      recoverCursor.ts,
+      ASSISTANT_NAME,
+      1,
+      recoverCursor.id,
+    );
     if (pending.length > 0) {
       logger.info({ group: group.name }, "Recovery: found unprocessed messages");
       queue.enqueueMessageCheck(chatJid);
