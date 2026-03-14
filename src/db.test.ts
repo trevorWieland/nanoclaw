@@ -939,6 +939,27 @@ describe("router_state pending_tail_drain", () => {
     expect(raw).toBeDefined();
     expect(JSON.parse(raw!)).toEqual([]);
   });
+
+  it("round-trips new Map format (JSON object with cursors)", () => {
+    const data = {
+      "group1@g.us": { ts: "2024-01-01T00:00:05.000Z", id: "msg-50" },
+      "group2@g.us": { ts: "2024-01-01T00:01:00.000Z", id: "msg-120" },
+    };
+    setRouterState("pending_tail_drain", JSON.stringify(data));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    const parsed = JSON.parse(raw!);
+    expect(parsed).toEqual(data);
+    expect(parsed["group1@g.us"].ts).toBe("2024-01-01T00:00:05.000Z");
+    expect(parsed["group1@g.us"].id).toBe("msg-50");
+  });
+
+  it("handles empty object", () => {
+    setRouterState("pending_tail_drain", JSON.stringify({}));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual({});
+  });
 });
 
 // --- Regression: trigger scanning and piping with large backlogs ---

@@ -83,7 +83,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
-const pendingTailDrain = new Set<string>();
+const pendingTailDrain = new Map<string, { ts: string; id: string }>();
 
 function loadState(): void {
   lastTimestamp = getRouterState("last_timestamp") || "";
@@ -102,9 +102,16 @@ function loadState(): void {
   }
   const tailDrainRaw = getRouterState("pending_tail_drain");
   try {
-    const arr: string[] = tailDrainRaw ? JSON.parse(tailDrainRaw) : [];
+    const parsed = tailDrainRaw ? JSON.parse(tailDrainRaw) : {};
     pendingTailDrain.clear();
-    for (const jid of arr) pendingTailDrain.add(jid);
+    if (Array.isArray(parsed)) {
+      // Migration: old format was ["jid1", "jid2"]
+      for (const jid of parsed) pendingTailDrain.set(jid, { ts: "", id: "" });
+    } else {
+      for (const [jid, cursor] of Object.entries(parsed)) {
+        pendingTailDrain.set(jid, cursor as { ts: string; id: string });
+      }
+    }
   } catch {
     logger.warn("Corrupted pending_tail_drain in DB, resetting");
     pendingTailDrain.clear();
@@ -120,7 +127,7 @@ function saveState(): void {
 }
 
 function savePendingTailDrain(): void {
-  setRouterState("pending_tail_drain", JSON.stringify([...pendingTailDrain]));
+  setRouterState("pending_tail_drain", JSON.stringify(Object.fromEntries(pendingTailDrain)));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -168,7 +175,7 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /** @internal - exported for testing */
-export function _getPendingTailDrain(): ReadonlySet<string> {
+export function _getPendingTailDrain(): ReadonlyMap<string, { ts: string; id: string }> {
   return pendingTailDrain;
 }
 
@@ -187,9 +194,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const isMainGroup = group.isMain === true;
+  const needsFullDrain = !isMainGroup && group.requiresTrigger !== false;
 
   const cursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
-  let missedMessages = getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id);
+  let missedMessages = needsFullDrain
+    ? getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id)
+    : getMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, MAX_PROMPT_MESSAGES, cursor.id);
 
   if (missedMessages.length === 0) {
     if (pendingTailDrain.delete(chatJid)) savePendingTailDrain();
@@ -200,19 +210,49 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Only set for non-main groups with trigger requirements.
   let truncated = false;
   let isTailDrain = false;
+  let tailDrainCutoff: { ts: string; id: string } | null = null;
+  // Capture the last message's cursor for use as cutoff on first truncation.
+  const fullBacklogLast =
+    missedMessages.length > 0
+      ? {
+          ts: missedMessages[missedMessages.length - 1].timestamp,
+          id: missedMessages[missedMessages.length - 1].id,
+        }
+      : null;
+  // Track whether we deleted from pendingTailDrain (for persisting on early returns).
+  let wasTailDrain = false;
 
   // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
-    isTailDrain = pendingTailDrain.delete(chatJid);
+  if (needsFullDrain) {
+    tailDrainCutoff = pendingTailDrain.get(chatJid) ?? null;
+    wasTailDrain = pendingTailDrain.delete(chatJid);
+    isTailDrain = wasTailDrain;
     // DB save deferred until batch completes (crash safety)
     if (isTailDrain) {
       // Continuation of a truncated trigger window — skip trigger requirement.
-      // Process oldest-first; cap overflow for another cycle.
-      if (missedMessages.length > MAX_PROMPT_MESSAGES) {
+      // Filter to messages at or before the cutoff so post-cutoff messages
+      // get normal trigger-gated processing.
+      if (tailDrainCutoff && tailDrainCutoff.ts !== "") {
+        const cutoffIdx = missedMessages.findIndex(
+          (m) =>
+            m.timestamp > tailDrainCutoff!.ts ||
+            (m.timestamp === tailDrainCutoff!.ts && m.id > tailDrainCutoff!.id),
+        );
+        if (cutoffIdx === 0) {
+          // All messages are past cutoff — tail-drain is complete
+          isTailDrain = false;
+        } else if (cutoffIdx > 0) {
+          missedMessages = missedMessages.slice(0, cutoffIdx);
+        }
+        // cutoffIdx === -1: all messages at/before cutoff — process all
+      }
+      // Cap at MAX_PROMPT_MESSAGES; overflow re-enters next cycle
+      if (isTailDrain && missedMessages.length > MAX_PROMPT_MESSAGES) {
         truncated = true;
         missedMessages = missedMessages.slice(0, MAX_PROMPT_MESSAGES);
       }
-    } else {
+    }
+    if (!isTailDrain) {
       // Normal path: require a trigger
       const allowlistCfg = loadSenderAllowlist();
       const triggerIdx = missedMessages.findIndex(
@@ -220,7 +260,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           TRIGGER_PATTERN.test(m.content.trim()) &&
           (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
       );
-      if (triggerIdx < 0) return true;
+      if (triggerIdx < 0) {
+        if (wasTailDrain) savePendingTailDrain();
+        return true;
+      }
       const total = missedMessages.length;
       const window = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
       truncated = window.truncated;
@@ -302,7 +345,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
       );
       if (truncated) {
-        pendingTailDrain.add(chatJid);
+        const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast!;
+        pendingTailDrain.set(chatJid, cutoff);
         savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
       } else if (isTailDrain) {
@@ -314,7 +358,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     if (isTailDrain) {
-      pendingTailDrain.add(chatJid);
+      pendingTailDrain.set(chatJid, tailDrainCutoff!);
       savePendingTailDrain();
     }
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
@@ -322,11 +366,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   if (truncated) {
-    pendingTailDrain.add(chatJid);
+    const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast!;
+    pendingTailDrain.set(chatJid, cutoff);
     savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
   } else if (isTailDrain) {
     savePendingTailDrain();
+    queue.enqueueMessageCheck(chatJid);
   }
   return true;
 }

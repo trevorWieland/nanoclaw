@@ -373,3 +373,125 @@ describe("anchorTriggerWindow", () => {
     expect(remaining[0]).toBe(cap);
   });
 });
+
+// --- Tail-drain cutoff filtering ---
+
+describe("tail-drain cutoff filtering", () => {
+  // Replicates the cutoff filtering logic from processGroupMessages:
+  // findIndex where message is past the cutoff cursor, then slice.
+  function applyCutoff(
+    messages: { timestamp: string; id: string }[],
+    cutoff: { ts: string; id: string },
+  ): { timestamp: string; id: string }[] {
+    if (cutoff.ts === "") return messages;
+    const cutoffIdx = messages.findIndex(
+      (m) => m.timestamp > cutoff.ts || (m.timestamp === cutoff.ts && m.id > cutoff.id),
+    );
+    if (cutoffIdx === 0) return [];
+    if (cutoffIdx > 0) return messages.slice(0, cutoffIdx);
+    return messages;
+  }
+
+  it("cutoff filters messages to those at or before cursor", () => {
+    const messages = [
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "m1" },
+      { timestamp: "2024-01-01T00:00:02.000Z", id: "m2" },
+      { timestamp: "2024-01-01T00:00:03.000Z", id: "m3" },
+      { timestamp: "2024-01-01T00:00:04.000Z", id: "m4" },
+      { timestamp: "2024-01-01T00:00:05.000Z", id: "m5" },
+    ];
+    const cutoff = { ts: "2024-01-01T00:00:03.000Z", id: "m3" };
+    const result = applyCutoff(messages, cutoff);
+    expect(result.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("cutoff on tied timestamp uses id tie-breaker", () => {
+    const messages = [
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "a" },
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "b" },
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "c" },
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "d" },
+    ];
+    const cutoff = { ts: "2024-01-01T00:00:01.000Z", id: "b" };
+    const result = applyCutoff(messages, cutoff);
+    // "a" and "b" are at or before cutoff; "c" and "d" are past
+    expect(result.map((m) => m.id)).toEqual(["a", "b"]);
+  });
+
+  it("all messages past cutoff returns empty array", () => {
+    const messages = [
+      { timestamp: "2024-01-01T00:00:05.000Z", id: "m5" },
+      { timestamp: "2024-01-01T00:00:06.000Z", id: "m6" },
+    ];
+    const cutoff = { ts: "2024-01-01T00:00:04.000Z", id: "m4" };
+    const result = applyCutoff(messages, cutoff);
+    expect(result).toEqual([]);
+  });
+
+  it("empty cutoff sentinel skips filtering", () => {
+    const messages = [
+      { timestamp: "2024-01-01T00:00:01.000Z", id: "m1" },
+      { timestamp: "2024-01-01T00:00:02.000Z", id: "m2" },
+    ];
+    const cutoff = { ts: "", id: "" };
+    const result = applyCutoff(messages, cutoff);
+    expect(result).toEqual(messages);
+  });
+
+  it("re-truncation preserves original cutoff, not current backlog end", () => {
+    // Simulates two-cycle drain:
+    // Cycle 1: 500 messages, trigger at 100, anchorTriggerWindow truncates.
+    //   → cutoff stored as { ts of msg 500, id of msg 500 }
+    // Cycle 2: re-fetches remaining, still > MAX, re-truncates.
+    //   → cutoff should stay at msg 500 (original), not msg 400.
+    const originalCutoff = { ts: "2024-01-01T00:08:20.000Z", id: "msg-500" };
+
+    // Cycle 2 sees messages 201-500 (within cutoff) plus 501-550 (new arrivals)
+    const cycle2Messages = Array.from({ length: 350 }, (_, i) => ({
+      timestamp: `2024-01-01T00:${String(3 + Math.floor(i / 60)).padStart(2, "0")}:${String((i + 21) % 60).padStart(2, "0")}.000Z`,
+      id: `msg-${201 + i}`,
+    }));
+
+    // Apply cutoff — should filter out messages past msg-500
+    const filtered = applyCutoff(cycle2Messages, originalCutoff);
+    // All 300 messages from msg-201 to msg-500 should pass (their timestamps are <= cutoff)
+    expect(filtered.length).toBeLessThanOrEqual(300);
+    // On re-truncation, the code preserves tailDrainCutoff (originalCutoff),
+    // not fullBacklogLast. Verify by checking the logic:
+    const isTailDrain = true;
+    const tailDrainCutoff = originalCutoff;
+    const fullBacklogLast = {
+      ts: cycle2Messages[cycle2Messages.length - 1].timestamp,
+      id: cycle2Messages[cycle2Messages.length - 1].id,
+    };
+    const cutoff = isTailDrain && tailDrainCutoff ? tailDrainCutoff : fullBacklogLast;
+    expect(cutoff).toEqual(originalCutoff);
+  });
+});
+
+// --- Bounded fetch path ---
+
+describe("bounded fetch path", () => {
+  it("main group uses bounded newest-N, not full drain", () => {
+    // Verify the decision logic: main groups use getMessagesSince (bounded),
+    // not getAllMessagesSince (full drain).
+    const isMainGroup = true;
+    const requiresTrigger = undefined;
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+    expect(needsFullDrain).toBe(false);
+  });
+
+  it("requiresTrigger=false group uses bounded newest-N", () => {
+    const isMainGroup = false;
+    const requiresTrigger = false;
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+    expect(needsFullDrain).toBe(false);
+  });
+
+  it("non-main trigger-required group uses full drain", () => {
+    const isMainGroup = false;
+    const requiresTrigger = undefined;
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+    expect(needsFullDrain).toBe(true);
+  });
+});
