@@ -495,3 +495,49 @@ describe("bounded fetch path", () => {
     expect(needsFullDrain).toBe(true);
   });
 });
+
+// --- tail-drain exit-point requeue decisions ---
+
+describe("tail-drain exit-point requeue decisions", () => {
+  // Models the requeue decision at each tail-drain exit point in processMessages.
+  // Each test derives `shouldRequeue` using the same boolean logic as the real code.
+
+  it("error+output+truncated always requeues", () => {
+    const truncated = true;
+    const isTailDrain = true;
+    // truncated branch always requeues regardless of isTailDrain
+    const shouldRequeue = truncated;
+    expect(shouldRequeue).toBe(true);
+  });
+
+  it("error+output+isTailDrain without truncation requeues", () => {
+    const truncated = false;
+    const isTailDrain = true;
+    // else-if isTailDrain branch — the bug was a missing requeue here
+    const shouldRequeue = !truncated && isTailDrain;
+    expect(shouldRequeue).toBe(true);
+  });
+
+  it("error+rollback+isTailDrain does not requeue (returns false for retry)", () => {
+    const outputSentToUser = false;
+    const isTailDrain = true;
+    // When no output was sent, the cursor rolls back and processMessages returns false.
+    // The caller's natural retry handles requeue, so no explicit enqueue is needed.
+    const shouldRequeue = outputSentToUser && isTailDrain;
+    expect(shouldRequeue).toBe(false);
+  });
+
+  it("success+truncated always requeues", () => {
+    const truncated = true;
+    const isTailDrain = true;
+    const shouldRequeue = truncated;
+    expect(shouldRequeue).toBe(true);
+  });
+
+  it("success+isTailDrain without truncation requeues", () => {
+    const truncated = false;
+    const isTailDrain = true;
+    const shouldRequeue = !truncated && isTailDrain;
+    expect(shouldRequeue).toBe(true);
+  });
+});

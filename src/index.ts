@@ -351,6 +351,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         queue.enqueueMessageCheck(chatJid);
       } else if (isTailDrain) {
         savePendingTailDrain();
+        queue.enqueueMessageCheck(chatJid);
       }
       return true;
     }
