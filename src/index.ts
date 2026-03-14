@@ -174,6 +174,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // Whether the trigger window was truncated (tail messages still need processing).
+  // Only set for non-main groups with trigger requirements.
+  let truncated = false;
+
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
@@ -184,12 +188,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     if (triggerIdx < 0) return true;
     const total = missedMessages.length;
-    const { start, end, truncated } = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
-    missedMessages = missedMessages.slice(start, end);
-    // Re-enqueue so tail messages are checked for additional triggers
-    if (truncated) {
-      queue.enqueueMessageCheck(chatJid);
-    }
+    const window = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
+    truncated = window.truncated;
+    missedMessages = missedMessages.slice(window.start, window.end);
   }
 
   const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES);
@@ -265,6 +266,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
       );
+      if (truncated) queue.enqueueMessageCheck(chatJid);
       return true;
     }
     // Roll back cursor so retries can re-process these messages
@@ -274,6 +276,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  if (truncated) queue.enqueueMessageCheck(chatJid);
   return true;
 }
 

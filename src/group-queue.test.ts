@@ -413,6 +413,64 @@ describe("GroupQueue", () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  // --- Retry backoff + pendingMessages interaction (regression guards) ---
+
+  it("failure with pendingMessages set during run bypasses retry backoff (regression guard)", async () => {
+    // Documents why callers must NOT set pendingMessages during a failing run.
+    // If they do, drainGroup sees pendingMessages=true and immediately re-runs,
+    // bypassing the exponential backoff that scheduleRetry set up.
+    let callCount = 0;
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      callCount++;
+      // Simulate the OLD eager requeue: caller enqueues during the run
+      if (callCount === 1) {
+        queue.enqueueMessageCheck(groupJid);
+      }
+      // Call 1 fails; call 2 succeeds (stops retry cascade)
+      return callCount > 1;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // Both calls complete within 10ms — drain bypassed the 5000ms backoff.
+    // Call 1 failed and set pendingMessages=true via the eager enqueue.
+    // drainGroup saw pendingMessages and immediately started call 2
+    // instead of waiting for the 5000ms retry timer.
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+  });
+
+  it("deferred requeue after success does not interfere with retry backoff", async () => {
+    // Shows the correct behavior: fail first (backoff respected),
+    // then succeed and enqueue tail messages.
+    let callCount = 0;
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      callCount++;
+      if (callCount === 1) return false; // first call fails
+      // Second call succeeds and enqueues tail messages (deferred requeue)
+      if (callCount === 2) queue.enqueueMessageCheck(groupJid);
+      return true; // all subsequent calls succeed
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // First call fails immediately
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Backoff is respected: no retry before BASE_RETRY_MS (5000ms)
+    await vi.advanceTimersByTimeAsync(4900);
+    expect(callCount).toBe(1);
+
+    // After backoff: retry succeeds, deferred tail requeue fires as new drain
+    await vi.advanceTimersByTimeAsync(200);
+    expect(callCount).toBe(3); // call 2 (retry) + call 3 (tail drain)
+  });
+
   it("preempts when idle arrives with pending tasks", async () => {
     const fs = await import("fs");
     let resolveProcess: () => void;
