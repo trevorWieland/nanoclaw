@@ -814,6 +814,116 @@ describe("stale pendingTailDrain recovery at startup", () => {
   });
 });
 
+// --- tail-drain config-change deadlock ---
+
+describe("tail-drain config-change deadlock", () => {
+  // When a group's config changes so needsFullDrain flips to false (e.g.,
+  // requiresTrigger → false, or isMain → true), the bounded path runs
+  // without ever touching pendingTailDrain. The poll guard sees the stale
+  // entry and blocks the group permanently.
+
+  it("stale entry blocks group indefinitely when config changes to non-trigger", () => {
+    // Models the regression: entry persists through the bounded path
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const isMainGroup = false;
+    const requiresTrigger = false; // config changed!
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+
+    // Without the fix: bounded path runs, never touches pendingTailDrain
+    if (needsFullDrain) {
+      pendingTailDrain.delete("group1@g.us");
+    }
+
+    // Poll guard checks — entry still present → group blocked forever
+    expect(pendingTailDrain.has("group1@g.us")).toBe(true);
+  });
+
+  it("clears stale entry when group no longer needs full drain", () => {
+    // Models the fix: early cleanup before message fetching
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+    const isMainGroup = false;
+    const requiresTrigger = false; // config changed!
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+
+    // The fix: clear stale entry when needsFullDrain is false
+    if (!needsFullDrain && pendingTailDrain.delete("group1@g.us")) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.has("group1@g.us")).toBe(false);
+    expect(saved).toBe(true);
+  });
+
+  it("clears stale entry when group becomes main", () => {
+    // Variant: isMain flips to true → needsFullDrain becomes false
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+    let isMainGroup = true; // config changed!
+    let requiresTrigger = true; // still true, but isMain overrides
+    const needsFullDrain = !isMainGroup && (requiresTrigger as boolean) !== false;
+
+    if (!needsFullDrain && pendingTailDrain.delete("group1@g.us")) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.has("group1@g.us")).toBe(false);
+    expect(saved).toBe(true);
+  });
+
+  it("no-op when group still needs full drain", () => {
+    // Negative: entry untouched when needsFullDrain is true
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+    let isMainGroup = false;
+    let requiresTrigger = true;
+    const needsFullDrain = !isMainGroup && (requiresTrigger as boolean) !== false;
+
+    if (!needsFullDrain && pendingTailDrain.delete("group1@g.us")) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.has("group1@g.us")).toBe(true);
+    expect(saved).toBe(false);
+  });
+
+  it("no-op when no entry exists", () => {
+    // Negative: delete() returns false, no save
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+    const isMainGroup = false;
+    const requiresTrigger = false;
+    const needsFullDrain = !isMainGroup && requiresTrigger !== false;
+
+    if (!needsFullDrain && pendingTailDrain.delete("group1@g.us")) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.size).toBe(0);
+    expect(saved).toBe(false);
+  });
+});
+
 // --- tail-drain poll guard backoff safety ---
 
 describe("tail-drain poll guard backoff safety", () => {

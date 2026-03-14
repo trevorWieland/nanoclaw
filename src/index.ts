@@ -196,6 +196,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
   const needsFullDrain = !isMainGroup && group.requiresTrigger !== false;
 
+  // Clear stale tail-drain entry if the group no longer needs full drain
+  // (e.g., requiresTrigger changed to false, or group became main).
+  // The bounded path doesn't touch pendingTailDrain, and the poll guard
+  // would block the group indefinitely if the entry persists.
+  if (!needsFullDrain && pendingTailDrain.delete(chatJid)) {
+    savePendingTailDrain();
+  }
+
   const cursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
   let missedMessages = needsFullDrain
     ? getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id)
