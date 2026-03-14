@@ -676,27 +676,38 @@ describe("DiscordChannel", () => {
       expect(currentClient().channels.fetch).toHaveBeenCalledWith("9876543210");
     });
 
-    it("handles send failure gracefully", async () => {
+    it("propagates send failure to caller", async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel("test-token", opts);
       await channel.connect();
 
       currentClient().channels.fetch.mockRejectedValueOnce(new Error("Channel not found"));
 
-      // Should not throw
-      await expect(
-        channel.sendMessage("dc:1234567890123456", "Will fail"),
-      ).resolves.toBeUndefined();
+      await expect(channel.sendMessage("dc:1234567890123456", "Will fail")).rejects.toThrow(
+        "Channel not found",
+      );
     });
 
-    it("does nothing when client is not initialized", async () => {
+    it("throws when client is not initialized", async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel("test-token", opts);
 
       // Don't connect — client is null
-      await channel.sendMessage("dc:1234567890123456", "No client");
+      await expect(channel.sendMessage("dc:1234567890123456", "No client")).rejects.toThrow(
+        "Discord client not initialized",
+      );
+    });
 
-      // No error, no API call
+    it("throws when channel is not text-based", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      currentClient().channels.fetch.mockResolvedValueOnce(null);
+
+      await expect(channel.sendMessage("dc:1234567890123456", "No channel")).rejects.toThrow(
+        "Discord channel not found or not text-based",
+      );
     });
 
     it("splits messages exceeding 2000 characters", async () => {

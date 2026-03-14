@@ -189,8 +189,7 @@ export class DiscordChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client) {
-      logger.warn("Discord client not initialized");
-      return;
+      throw new Error("Discord client not initialized");
     }
 
     try {
@@ -198,8 +197,7 @@ export class DiscordChannel implements Channel {
       const channel = await this.client.channels.fetch(channelId);
 
       if (!channel || !("send" in channel)) {
-        logger.warn({ jid }, "Discord channel not found or not text-based");
-        return;
+        throw new Error(`Discord channel not found or not text-based: ${jid}`);
       }
 
       const textChannel = channel as TextChannel;
@@ -216,6 +214,7 @@ export class DiscordChannel implements Channel {
       logger.info({ jid, length: text.length }, "Discord message sent");
     } catch (err) {
       logger.error({ jid, err }, "Failed to send Discord message");
+      throw err;
     }
   }
 

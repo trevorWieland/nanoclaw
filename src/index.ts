@@ -311,6 +311,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
+  let hadSendError = false;
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
@@ -332,6 +333,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
             recordSent(chatJid, text);
             outputSentToUser = true;
           } catch (err) {
+            hadSendError = true;
             logger.error({ group: group.name, chatJid, err }, "Failed to send output to channel");
           }
         }
@@ -381,6 +383,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       savePendingTailDrain();
     }
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
+    return false;
+  }
+
+  // Agent succeeded but channel delivery failed — roll back cursor for retry.
+  // Only roll back if no output reached the user (avoid duplicate sends).
+  if (hadSendError && !outputSentToUser) {
+    lastAgentTimestamp[chatJid] = previousCursor;
+    saveState();
+    if (isTailDrain) {
+      pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
+      savePendingTailDrain();
+    } else if (wasTailDrain) {
+      savePendingTailDrain();
+    }
+    logger.warn({ group: group.name }, "All channel sends failed, rolled back cursor for retry");
     return false;
   }
 
