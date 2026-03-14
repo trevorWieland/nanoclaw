@@ -573,6 +573,25 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
+  // Phase 1: Enqueue groups with pending tail-drain entries from the DB.
+  // After a crash, the entry may survive even though no messages remain
+  // at the cutoff — processGroupMessages will clear it (line 205).
+  let removedStale = false;
+  for (const chatJid of pendingTailDrain.keys()) {
+    if (registeredGroups[chatJid]) {
+      logger.info(
+        { group: registeredGroups[chatJid].name },
+        "Recovery: resuming pending tail-drain",
+      );
+      queue.enqueueMessageCheck(chatJid);
+    } else {
+      pendingTailDrain.delete(chatJid);
+      removedStale = true;
+    }
+  }
+  if (removedStale) savePendingTailDrain();
+
+  // Phase 2: Enqueue groups with unprocessed messages at the cursor.
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const recoverCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
     const pending = getMessagesSince(

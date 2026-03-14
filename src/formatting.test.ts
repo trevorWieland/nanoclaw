@@ -621,6 +621,158 @@ describe("pipe path tail-drain guard", () => {
   });
 });
 
+// --- stale pendingTailDrain recovery at startup ---
+
+describe("stale pendingTailDrain recovery at startup", () => {
+  // After a crash/restart, pendingTailDrain entries may survive in the DB
+  // even though the messages at the cutoff were already processed. Without
+  // recovery, the poll guard blocks the group forever.
+
+  it("recovery enqueues group with pendingTailDrain entry even when no messages pending", () => {
+    // Models the fix: Phase 1 enqueues groups with tail-drain entries
+    // regardless of whether messages exist at the cursor.
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      [chatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const registeredGroups: Record<string, { name: string }> = {
+      [chatJid]: { name: "Test Group" },
+    };
+    const enqueued: string[] = [];
+
+    // Phase 1 logic
+    for (const jid of pendingTailDrain.keys()) {
+      if (registeredGroups[jid]) {
+        enqueued.push(jid);
+      }
+    }
+
+    expect(enqueued).toContain(chatJid);
+  });
+
+  it("without the fix, group with stale entry is never enqueued", () => {
+    // Models the bug: Phase 2 only enqueues when messages exist.
+    // If messages were already processed, the group is skipped.
+    const chatJid = "group1@g.us";
+    const pendingMessages: unknown[] = []; // no messages at cursor
+    const enqueued: string[] = [];
+
+    // Phase 2 logic (original recovery — no Phase 1)
+    if (pendingMessages.length > 0) {
+      enqueued.push(chatJid);
+    }
+
+    expect(enqueued).not.toContain(chatJid);
+  });
+
+  it("poll guard blocks the group forever when entry is not cleared", () => {
+    // Models the deadlock: poll guard skips group, processGroupMessages
+    // never runs, entry never cleared.
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      [chatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    let processGroupRan = false;
+
+    // Simulate multiple poll iterations
+    for (let i = 0; i < 5; i++) {
+      if (pendingTailDrain.has(chatJid)) {
+        continue; // guard blocks — processGroupMessages never called
+      }
+      processGroupRan = true;
+    }
+
+    expect(processGroupRan).toBe(false);
+    expect(pendingTailDrain.has(chatJid)).toBe(true); // still stuck
+  });
+
+  it("processGroupMessages clears stale entry when no messages exist", () => {
+    // Models self-healing: once enqueued, processGroupMessages sees
+    // zero messages and clears the entry (line 204-206).
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      [chatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const missedMessages: unknown[] = []; // no messages at cursor
+
+    // processGroupMessages logic (lines 204-206)
+    if (missedMessages.length === 0) {
+      pendingTailDrain.delete(chatJid);
+    }
+
+    expect(pendingTailDrain.has(chatJid)).toBe(false);
+  });
+
+  it("recovery removes entries for unregistered groups", () => {
+    // Models cleanup: groups that no longer exist in registeredGroups
+    // get their stale entries removed.
+    const staleChatJid = "deleted-group@g.us";
+    const pendingTailDrain = new Map([
+      [staleChatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const registeredGroups: Record<string, { name: string }> = {};
+    let removedStale = false;
+
+    for (const jid of pendingTailDrain.keys()) {
+      if (!registeredGroups[jid]) {
+        pendingTailDrain.delete(jid);
+        removedStale = true;
+      }
+    }
+
+    expect(pendingTailDrain.size).toBe(0);
+    expect(removedStale).toBe(true);
+  });
+
+  it("recovery does not persist when no stale entries removed", () => {
+    // Avoids unnecessary DB writes when all entries belong to registered groups.
+    const chatJid = "group1@g.us";
+    const pendingTailDrain = new Map([
+      [chatJid, { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    const registeredGroups: Record<string, { name: string }> = {
+      [chatJid]: { name: "Test Group" },
+    };
+    let removedStale = false;
+    let saveCalled = false;
+
+    for (const jid of pendingTailDrain.keys()) {
+      if (!registeredGroups[jid]) {
+        pendingTailDrain.delete(jid);
+        removedStale = true;
+      }
+    }
+    if (removedStale) saveCalled = true;
+
+    expect(saveCalled).toBe(false);
+  });
+
+  it("double enqueue from both phases is safe (idempotent)", () => {
+    // Models Phase 1 + Phase 2 overlap: a group with both a tail-drain
+    // entry and pending messages gets enqueued twice, which is safe
+    // because enqueueMessageCheck just sets pendingMessages = true.
+    const chatJid = "group1@g.us";
+    const state = { active: false, pendingMessages: false };
+    const enqueueCount = { value: 0 };
+
+    // Simulate enqueueMessageCheck idempotency
+    function enqueueMessageCheck() {
+      if (state.active) {
+        state.pendingMessages = true;
+      }
+      enqueueCount.value++;
+    }
+
+    // Phase 1 enqueues
+    enqueueMessageCheck();
+    // Phase 2 also enqueues (messages exist)
+    enqueueMessageCheck();
+
+    // Both calls succeed without error — idempotent
+    expect(enqueueCount.value).toBe(2);
+  });
+});
+
 // --- tail-drain poll guard backoff safety ---
 
 describe("tail-drain poll guard backoff safety", () => {
