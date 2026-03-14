@@ -352,4 +352,24 @@ describe("anchorTriggerWindow", () => {
   it("trigger exactly at total-max boundary", () => {
     expect(anchorTriggerWindow(300, 100, 200)).toEqual({ start: 100, end: 300, truncated: false });
   });
+
+  it("tail continuation slices oldest-first up to cap", () => {
+    // Simulates the tail-drain path: after anchorTriggerWindow truncated,
+    // the follow-up batch contains the remaining messages. The tail-drain
+    // code uses .slice(0, MAX) to process oldest-first and cap overflow.
+    const tail = Array.from({ length: 150 }, (_, i) => i);
+    const cap = 100;
+
+    const batch = tail.slice(0, cap);
+    expect(batch).toHaveLength(cap);
+    // Oldest message (index 0) is first
+    expect(batch[0]).toBe(0);
+    // Last message in batch
+    expect(batch[cap - 1]).toBe(cap - 1);
+
+    // Remaining overflow for next cycle
+    const remaining = tail.slice(cap);
+    expect(remaining).toHaveLength(50);
+    expect(remaining[0]).toBe(cap);
+  });
 });

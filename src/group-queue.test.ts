@@ -471,6 +471,56 @@ describe("GroupQueue", () => {
     expect(callCount).toBe(3); // call 2 (retry) + call 3 (tail drain)
   });
 
+  // --- Multi-cycle tail drain ---
+
+  it("multi-cycle tail drain processes all overflow batches", async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      callCount++;
+      // Calls 1 and 2 simulate truncated=true by re-enqueueing
+      if (callCount <= 2) queue.enqueueMessageCheck(groupJid);
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // All 3 calls should complete without delays (no backoff on success)
+    await vi.advanceTimersByTimeAsync(30);
+    expect(callCount).toBe(3);
+  });
+
+  it("tail drain after failure re-enqueues correctly on retry", async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      callCount++;
+      if (callCount === 1) {
+        // First call succeeds and enqueues tail
+        queue.enqueueMessageCheck(groupJid);
+        return true;
+      }
+      if (callCount === 2) return false; // tail drain fails
+      return true; // retry succeeds
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // Call 1 succeeds, call 2 (tail drain) fires immediately
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(2);
+
+    // Backoff before retry: no call within 4900ms
+    await vi.advanceTimersByTimeAsync(4900);
+    expect(callCount).toBe(2);
+
+    // Retry fires after backoff
+    await vi.advanceTimersByTimeAsync(200);
+    expect(callCount).toBe(3);
+  });
+
   it("preempts when idle arrives with pending tasks", async () => {
     const fs = await import("fs");
     let resolveProcess: () => void;

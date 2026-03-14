@@ -83,6 +83,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const pendingTailDrain = new Set<string>();
 
 function loadState(): void {
   lastTimestamp = getRouterState("last_timestamp") || "";
@@ -172,25 +173,40 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const cursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
   let missedMessages = getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id);
 
-  if (missedMessages.length === 0) return true;
+  if (missedMessages.length === 0) {
+    pendingTailDrain.delete(chatJid);
+    return true;
+  }
 
   // Whether the trigger window was truncated (tail messages still need processing).
   // Only set for non-main groups with trigger requirements.
   let truncated = false;
+  let isTailDrain = false;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const allowlistCfg = loadSenderAllowlist();
-    const triggerIdx = missedMessages.findIndex(
-      (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-    );
-    if (triggerIdx < 0) return true;
-    const total = missedMessages.length;
-    const window = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
-    truncated = window.truncated;
-    missedMessages = missedMessages.slice(window.start, window.end);
+    isTailDrain = pendingTailDrain.delete(chatJid);
+    if (isTailDrain) {
+      // Continuation of a truncated trigger window — skip trigger requirement.
+      // Process oldest-first; cap overflow for another cycle.
+      if (missedMessages.length > MAX_PROMPT_MESSAGES) {
+        truncated = true;
+        missedMessages = missedMessages.slice(0, MAX_PROMPT_MESSAGES);
+      }
+    } else {
+      // Normal path: require a trigger
+      const allowlistCfg = loadSenderAllowlist();
+      const triggerIdx = missedMessages.findIndex(
+        (m) =>
+          TRIGGER_PATTERN.test(m.content.trim()) &&
+          (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+      );
+      if (triggerIdx < 0) return true;
+      const total = missedMessages.length;
+      const window = anchorTriggerWindow(total, triggerIdx, MAX_PROMPT_MESSAGES);
+      truncated = window.truncated;
+      missedMessages = missedMessages.slice(window.start, window.end);
+    }
   }
 
   const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES);
@@ -266,17 +282,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
       );
-      if (truncated) queue.enqueueMessageCheck(chatJid);
+      if (truncated) {
+        pendingTailDrain.add(chatJid);
+        queue.enqueueMessageCheck(chatJid);
+      }
       return true;
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
+    if (isTailDrain) pendingTailDrain.add(chatJid);
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
     return false;
   }
 
-  if (truncated) queue.enqueueMessageCheck(chatJid);
+  if (truncated) {
+    pendingTailDrain.add(chatJid);
+    queue.enqueueMessageCheck(chatJid);
+  }
   return true;
 }
 
