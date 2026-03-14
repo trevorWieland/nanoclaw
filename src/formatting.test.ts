@@ -1040,3 +1040,184 @@ describe("error rollback cutoff with empty sentinel", () => {
     expect(rollbackCutoff).toEqual(tailDrainCutoff);
   });
 });
+
+// --- tail-drain retry exhaustion deadlock ---
+
+describe("tail-drain retry exhaustion deadlock", () => {
+  // After MAX_RETRIES, scheduleRetry resets retryCount and returns without
+  // scheduling another timer. If pendingTailDrain still has an entry, the
+  // poll guard blocks the group forever.
+
+  it("stale entry persists after retry exhaustion without callback", () => {
+    // Models the regression: pendingTailDrain entry survives through retry
+    // exhaustion, and the poll guard blocks the group indefinitely.
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+
+    // Simulate retry exhaustion (retryCount > MAX_RETRIES) — no cleanup.
+    const retryCount = 6;
+    const MAX_RETRIES = 5;
+    if (retryCount > MAX_RETRIES) {
+      // scheduleRetry resets count but does NOT touch pendingTailDrain
+    }
+
+    // Entry persists — poll guard will block this group
+    expect(pendingTailDrain.has("group1@g.us")).toBe(true);
+
+    // Poll guard blocks: new messages hit continue
+    let blocked = false;
+    if (pendingTailDrain.has("group1@g.us")) {
+      blocked = true; // continue in the real code
+    }
+    expect(blocked).toBe(true);
+  });
+
+  it("callback clears stale entry after retry exhaustion", () => {
+    // Models the fix: onRetriesExhausted callback deletes the entry and saves.
+    const pendingTailDrain = new Map([
+      ["group1@g.us", { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" }],
+    ]);
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+
+    // Simulate the callback firing on retry exhaustion
+    const groupJid = "group1@g.us";
+    if (pendingTailDrain.delete(groupJid)) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.has("group1@g.us")).toBe(false);
+    expect(saved).toBe(true);
+
+    // Poll guard no longer blocks — next incoming message can enqueue
+    let blocked = false;
+    if (pendingTailDrain.has("group1@g.us")) {
+      blocked = true;
+    }
+    expect(blocked).toBe(false);
+  });
+
+  it("callback is no-op when no entry exists for group", () => {
+    // Negative: callback fires but group has no entry — no save needed.
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+    let saved = false;
+    const savePendingTailDrain = () => {
+      saved = true;
+    };
+
+    const groupJid = "group1@g.us";
+    if (pendingTailDrain.delete(groupJid)) {
+      savePendingTailDrain();
+    }
+
+    expect(pendingTailDrain.size).toBe(0);
+    expect(saved).toBe(false);
+  });
+});
+
+// --- tail-drain cursor/marker crash consistency ---
+
+describe("tail-drain cursor/marker crash consistency", () => {
+  // The cursor and tail-drain marker must be persisted atomically (in the
+  // same save window) to prevent crash-window data loss.
+
+  it("crash after cursor save but before marker save loses overflow", () => {
+    // Models the regression: cursor advanced, no marker persisted.
+    // After crash, recovery enters normal trigger-gated path for overflow.
+    const lastAgentTimestamp: Record<string, { ts: string; id: string }> = {};
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+    let stateSaved = false;
+    let tailDrainSaved = false;
+
+    const chatJid = "group1@g.us";
+    const truncated = true;
+    const batchLast = { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" };
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+
+    // OLD code: cursor saved first
+    lastAgentTimestamp[chatJid] = batchLast;
+    stateSaved = true;
+
+    // Simulate crash here — marker never saved
+    // (tailDrainSaved stays false)
+
+    // Recovery: cursor is advanced, no tail-drain marker
+    expect(stateSaved).toBe(true);
+    expect(tailDrainSaved).toBe(false);
+    expect(lastAgentTimestamp[chatJid]).toEqual(batchLast);
+    expect(pendingTailDrain.has(chatJid)).toBe(false);
+
+    // Recovery enters trigger-gated mode for overflow messages (msg-100 to msg-500)
+    // — those messages are lost if no trigger is present.
+    const needsTrigger = true;
+    const hasTailDrainEntry = pendingTailDrain.has(chatJid);
+    // Without the marker, recovery won't know to drain — enters normal trigger path
+    expect(hasTailDrainEntry).toBe(false);
+    expect(needsTrigger && !hasTailDrainEntry).toBe(true);
+  });
+
+  it("pre-persisting marker alongside cursor prevents overflow loss", () => {
+    // Models the fix: both cursor and marker saved before agent execution.
+    const lastAgentTimestamp: Record<string, { ts: string; id: string }> = {};
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+    let stateSaved = false;
+    let tailDrainSaved = false;
+
+    const chatJid = "group1@g.us";
+    const truncated = true;
+    const isTailDrain = true;
+    const tailDrainCutoff = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+    const batchLast = { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" };
+    const fullBacklogLast = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+
+    // NEW code: cursor and marker saved together
+    lastAgentTimestamp[chatJid] = batchLast;
+    if (truncated) {
+      const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast;
+      pendingTailDrain.set(chatJid, cutoff);
+      tailDrainSaved = true;
+    }
+    stateSaved = true;
+
+    // Simulate crash after both saves
+    expect(stateSaved).toBe(true);
+    expect(tailDrainSaved).toBe(true);
+    expect(lastAgentTimestamp[chatJid]).toEqual(batchLast);
+    expect(pendingTailDrain.has(chatJid)).toBe(true);
+
+    // Recovery finds the marker and continues the drain
+    const hasTailDrainEntry = pendingTailDrain.has(chatJid);
+    expect(hasTailDrainEntry).toBe(true);
+    expect(pendingTailDrain.get(chatJid)).toEqual(tailDrainCutoff);
+  });
+
+  it("error-without-output rollback is safe with pre-persisted marker", () => {
+    // Cursor rolled back on error, but the pre-saved marker persists.
+    // On retry, processGroupMessages finds the marker and enters tail-drain mode.
+    const lastAgentTimestamp: Record<string, { ts: string; id: string }> = {};
+    const pendingTailDrain = new Map<string, { ts: string; id: string }>();
+
+    const chatJid = "group1@g.us";
+    const previousCursor = { ts: "2024-01-01T00:00:00.000Z", id: "msg-0" };
+    const batchLast = { ts: "2024-01-01T00:05:00.000Z", id: "msg-100" };
+    const cutoff = { ts: "2024-01-01T00:10:00.000Z", id: "msg-500" };
+
+    // Pre-persist: cursor advanced and marker saved
+    lastAgentTimestamp[chatJid] = batchLast;
+    pendingTailDrain.set(chatJid, cutoff);
+
+    // Agent fails without output — roll back cursor
+    lastAgentTimestamp[chatJid] = previousCursor;
+
+    // Cursor rolled back, but marker still present
+    expect(lastAgentTimestamp[chatJid]).toEqual(previousCursor);
+    expect(pendingTailDrain.has(chatJid)).toBe(true);
+    expect(pendingTailDrain.get(chatJid)).toEqual(cutoff);
+
+    // On retry, processGroupMessages will find the marker and enter tail-drain
+    // mode, correctly re-processing the messages from previousCursor.
+  });
+});

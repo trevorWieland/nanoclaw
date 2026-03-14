@@ -286,6 +286,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const previousCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
   const last = missedMessages[missedMessages.length - 1];
   lastAgentTimestamp[chatJid] = { ts: last.timestamp, id: last.id };
+  // Pre-persist tail-drain marker alongside cursor to prevent crash-window data loss.
+  // If truncated, overflow messages exist beyond this batch — record the cutoff
+  // so recovery can continue the drain even if the process crashes during agent execution.
+  if (truncated) {
+    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
+    pendingTailDrain.set(chatJid, cutoff);
+    savePendingTailDrain();
+  }
   saveState();
 
   logger.info({ group: group.name, messageCount: missedMessages.length }, "Processing messages");
@@ -353,9 +361,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
       );
       if (truncated) {
-        const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
-        pendingTailDrain.set(chatJid, cutoff);
-        savePendingTailDrain();
+        // Marker already persisted at cursor-advance time.
         queue.enqueueMessageCheck(chatJid);
       } else if (isTailDrain) {
         savePendingTailDrain();
@@ -379,9 +385,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   if (truncated) {
-    const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
-    pendingTailDrain.set(chatJid, cutoff);
-    savePendingTailDrain();
+    // Marker already persisted at cursor-advance time; just enqueue continuation.
     queue.enqueueMessageCheck(chatJid);
   } else if (isTailDrain) {
     savePendingTailDrain();
@@ -748,6 +752,12 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.onRetriesExhausted = (groupJid: string) => {
+    if (pendingTailDrain.delete(groupJid)) {
+      savePendingTailDrain();
+      logger.info({ groupJid }, "Cleared stale pendingTailDrain after retry exhaustion");
+    }
+  };
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, "Message loop crashed unexpectedly");

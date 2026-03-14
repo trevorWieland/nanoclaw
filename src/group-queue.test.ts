@@ -211,6 +211,79 @@ describe("GroupQueue", () => {
     expect(callCount).toBe(countAfterMaxRetries);
   });
 
+  // --- onRetriesExhausted callback ---
+
+  it("calls onRetriesExhausted when max retries are exceeded", async () => {
+    let callCount = 0;
+    const exhaustedGroups: string[] = [];
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return false; // always fail
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.onRetriesExhausted = (groupJid: string) => {
+      exhaustedGroups.push(groupJid);
+    };
+
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // Initial call + 5 retries = 6 total calls
+    await vi.advanceTimersByTimeAsync(10);
+    const retryDelays = [5000, 10000, 20000, 40000, 80000];
+    for (const delay of retryDelays) {
+      await vi.advanceTimersByTimeAsync(delay + 10);
+    }
+
+    expect(callCount).toBe(6);
+    expect(exhaustedGroups).toEqual(["group1@g.us"]);
+  });
+
+  it("does not call onRetriesExhausted during normal retries", async () => {
+    let callCount = 0;
+    const exhaustedGroups: string[] = [];
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      return callCount > 1; // fail first, succeed second
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.onRetriesExhausted = (groupJid: string) => {
+      exhaustedGroups.push(groupJid);
+    };
+
+    queue.enqueueMessageCheck("group1@g.us");
+
+    // First call fails
+    await vi.advanceTimersByTimeAsync(10);
+    expect(callCount).toBe(1);
+
+    // Retry succeeds after backoff
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(callCount).toBe(2);
+
+    expect(exhaustedGroups).toEqual([]);
+  });
+
+  it("does not call onRetriesExhausted on success", async () => {
+    const exhaustedGroups: string[] = [];
+
+    const processMessages = vi.fn(async () => true);
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.onRetriesExhausted = (groupJid: string) => {
+      exhaustedGroups.push(groupJid);
+    };
+
+    queue.enqueueMessageCheck("group1@g.us");
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+    expect(exhaustedGroups).toEqual([]);
+  });
+
   // --- Waiting groups get drained when slots free up ---
 
   it("drains waiting groups when active slots free up", async () => {
