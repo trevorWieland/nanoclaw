@@ -188,8 +188,14 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(projectRoot, "container", "agent-runner", "src");
   const groupAgentRunnerDir = path.join(DATA_DIR, "sessions", group.folder, "agent-runner-src");
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
+    for (const file of fs.readdirSync(agentRunnerSrc)) {
+      const dest = path.join(groupAgentRunnerDir, file);
+      if (!fs.existsSync(dest)) {
+        fs.cpSync(path.join(agentRunnerSrc, file), dest, { recursive: true });
+      }
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -235,7 +241,12 @@ function buildContainerArgs(
   }
 
   if (tanrenApiUrl) {
-    args.push("-e", `TANREN_API_URL=${tanrenApiUrl}`);
+    // Rewrite localhost URLs so the container can reach the host via Docker's gateway
+    const containerTanrenUrl = tanrenApiUrl.replace(
+      /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
+      `//${CONTAINER_HOST_GATEWAY}`,
+    );
+    args.push("-e", `TANREN_API_URL=${containerTanrenUrl}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -317,7 +328,20 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
+    // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway
+    const containerInput = input.tanren
+      ? {
+          ...input,
+          tanren: {
+            ...input.tanren,
+            apiUrl: input.tanren.apiUrl.replace(
+              /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
+              `//${CONTAINER_HOST_GATEWAY}`,
+            ),
+          },
+        }
+      : input;
+    container.stdin.write(JSON.stringify(containerInput));
     container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive

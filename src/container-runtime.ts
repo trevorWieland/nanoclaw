@@ -16,26 +16,30 @@ export const CONTAINER_HOST_GATEWAY = "host.docker.internal";
 
 /**
  * Address the credential proxy binds to.
- * Docker Desktop (macOS): 127.0.0.1 — the VM routes host.docker.internal to loopback.
- * Docker (Linux): bind to the docker0 bridge IP so only containers can reach it,
- *   falling back to 127.0.0.1 if the interface isn't found.
+ * Docker Engine (Linux/WSL): bind to the docker0 bridge IP — containers reach it
+ *   via host.docker.internal which resolves to the bridge gateway.
+ * Docker Desktop (macOS/WSL): 127.0.0.1 — the VM routes host.docker.internal to loopback.
  */
 export const PROXY_BIND_HOST = process.env.CREDENTIAL_PROXY_HOST || detectProxyBindHost();
 
 function detectProxyBindHost(): string {
   if (os.platform() === "darwin") return "127.0.0.1";
 
-  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
-  // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
+  // Docker Engine creates docker0; Docker Desktop does not.
+  // Check this first — works for both bare-metal Linux and WSL with Docker Engine.
+  try {
+    const docker0 = os.networkInterfaces()["docker0"];
+    if (docker0) {
+      const ipv4 = docker0.find((a) => a.family === "IPv4");
+      if (ipv4) return ipv4.address;
+    }
+  } catch {
+    /* interface enumeration blocked — fall through to WSL/loopback */
+  }
+
+  // No docker0 — likely Docker Desktop (macOS or WSL). Loopback is correct.
   if (fs.existsSync("/proc/sys/fs/binfmt_misc/WSLInterop")) return "127.0.0.1";
 
-  // Bare-metal Linux: bind to the docker0 bridge IP.
-  const ifaces = os.networkInterfaces();
-  const docker0 = ifaces["docker0"];
-  if (docker0) {
-    const ipv4 = docker0.find((a) => a.family === "IPv4");
-    if (ipv4) return ipv4.address;
-  }
   logger.warn(
     "docker0 bridge not found; binding credential proxy to loopback for safety. Set CREDENTIAL_PROXY_HOST to override.",
   );
