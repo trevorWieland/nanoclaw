@@ -57,6 +57,8 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install pnpm and global tools
+ENV PNPM_HOME=/usr/local/share/pnpm
+ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable && corepack prepare pnpm@latest --activate \
     && pnpm install -g agent-browser @anthropic-ai/claude-code
 
@@ -85,7 +87,8 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 RUN printf '#!/bin/bash\nset -e\numask 077\ncd /app && pnpm exec tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\nrm -f /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+RUN chown -R node:node /workspace && chmod 777 /home/node \
+    && mkdir -p /home/node/.cache/node/corepack && chown -R node:node /home/node/.cache
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

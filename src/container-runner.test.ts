@@ -42,6 +42,7 @@ vi.mock("fs", async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -84,6 +85,7 @@ vi.mock("child_process", async () => {
 });
 
 import { spawn } from "child_process";
+import fs from "fs";
 import { runContainerAgent, ContainerOutput } from "./container-runner.js";
 import type { RegisteredGroup } from "./types.js";
 
@@ -253,5 +255,81 @@ describe("container-runner timeout behavior", () => {
     const result = await resultPromise;
     expect(result.status).toBe("success");
     expect(result.newSessionId).toBe("session-456");
+  });
+});
+
+describe("container-runner agent-runner sync", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReset();
+    vi.mocked(fs.readdirSync).mockReset();
+    vi.mocked(fs.cpSync).mockClear();
+    vi.mocked(fs.mkdirSync).mockClear();
+    vi.mocked(fs.statSync).mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("syncs new upstream files without overwriting existing ones", async () => {
+    // Simulate: agent-runner source has 3 files, session dir already has 2 of them
+    const existingFiles = new Set([
+      "/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src/agent.ts",
+      "/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src/tools.ts",
+    ]);
+
+    vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
+      const s = p.toString();
+      // agent-runner source dir exists
+      if (s.endsWith("container/agent-runner/src")) return true;
+      // skills source dir — not relevant for this test
+      if (s.includes("container/skills")) return false;
+      // global dir
+      if (s.endsWith("/global")) return false;
+      // .env file
+      if (s.endsWith(".env")) return false;
+      // settings.json doesn't exist yet (let it be created)
+      if (s.endsWith("settings.json")) return false;
+      // Existing files in session dir
+      if (existingFiles.has(s)) return true;
+      // New file doesn't exist yet
+      if (s.endsWith("tanren-mcp-stdio.ts")) return false;
+      return false;
+    });
+
+    vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
+      const s = p.toString();
+      if (s.endsWith("container/agent-runner/src")) {
+        return ["agent.ts", "tools.ts", "tanren-mcp-stdio.ts"];
+      }
+      if (s.includes("container/skills")) {
+        return [];
+      }
+      return [];
+    }) as typeof fs.readdirSync);
+
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    // Only the new file should be copied
+    const cpCalls = vi.mocked(fs.cpSync).mock.calls;
+    const copiedFiles = cpCalls
+      .filter(([src]) => src.toString().includes("agent-runner"))
+      .map(([src]) => src.toString());
+
+    expect(copiedFiles).toHaveLength(1);
+    expect(copiedFiles[0]).toContain("tanren-mcp-stdio.ts");
+
+    // Existing files should NOT have been overwritten
+    expect(copiedFiles.some((f) => f.endsWith("agent.ts"))).toBe(false);
+    expect(copiedFiles.some((f) => f.endsWith("tools.ts"))).toBe(false);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });
