@@ -19,6 +19,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  INSTANCE_ID,
   TIMEZONE,
 } from "./config.js";
 import { resolveGroupFolderPath, resolveGroupIpcPath } from "./group-folder.js";
@@ -216,6 +217,7 @@ function buildContainerArgs(
   tanrenApiUrl?: string,
 ): string[] {
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
+  args.push("--label", `nanoclaw.instance=${INSTANCE_ID}`);
 
   // Pass host timezone so container's local time matches the user's
   args.push("-e", `TZ=${TIMEZONE}`);

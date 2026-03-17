@@ -5,11 +5,16 @@
  * - docs/SECURITY.md#2-mount-security
  * - docs/FORK_OVERVIEW.md
  */
+import { createHash } from "crypto";
 import os from "os";
 import path from "path";
 
 import { readEnvFile } from "./env.js";
 import { CONFIG_ROOT, PROJECT_ROOT } from "./runtime-paths.js";
+
+export const INSTANCE_ID =
+  process.env.NANOCLAW_INSTANCE_ID ||
+  createHash("sha256").update(CONFIG_ROOT).digest("hex").slice(0, 8);
 
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only

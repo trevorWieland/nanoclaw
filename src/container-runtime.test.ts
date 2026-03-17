@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock config
+vi.mock("./config.js", () => ({
+  INSTANCE_ID: "test1234",
+}));
+
 // Mock logger
 vi.mock("./logger.js", () => ({
   logger: {
@@ -88,6 +93,11 @@ describe("cleanupOrphans", () => {
     // ps + 2 stop calls
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(mockExecSync).toHaveBeenNthCalledWith(
+      1,
+      `${CONTAINER_RUNTIME_BIN} ps --filter label=nanoclaw.instance=test1234 --format '{{.Names}}'`,
+      expect.anything(),
+    );
+    expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group1-111`,
       { stdio: "pipe" },
@@ -98,7 +108,7 @@ describe("cleanupOrphans", () => {
       { stdio: "pipe" },
     );
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ["nanoclaw-group1-111", "nanoclaw-group2-222"] },
+      { count: 2, names: ["nanoclaw-group1-111", "nanoclaw-group2-222"], instanceId: "test1234" },
       "Stopped orphaned containers",
     );
   });
@@ -138,7 +148,7 @@ describe("cleanupOrphans", () => {
 
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ["nanoclaw-a-1", "nanoclaw-b-2"] },
+      { count: 2, names: ["nanoclaw-a-1", "nanoclaw-b-2"], instanceId: "test1234" },
       "Stopped orphaned containers",
     );
   });
