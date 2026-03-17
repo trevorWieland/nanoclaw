@@ -248,6 +248,7 @@ describe("DiscordChannel", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -310,7 +311,6 @@ describe("DiscordChannel", () => {
       const err = await result;
       expect(err).toBeInstanceOf(Error);
       expect(err!.message).toBe("Discord login timed out after 30000ms");
-      vi.useRealTimers();
     });
 
     it("connect() destroys client on timeout", async () => {
@@ -326,7 +326,6 @@ describe("DiscordChannel", () => {
       await vi.advanceTimersByTimeAsync(30000);
 
       expect(destroySpy).toHaveBeenCalled();
-      vi.useRealTimers();
     });
 
     it("connect() rejects on Discord error event during login", async () => {
@@ -362,7 +361,6 @@ describe("DiscordChannel", () => {
       // Advancing past timeout should not cause issues
       await vi.advanceTimersByTimeAsync(60000);
       expect(channel.isConnected()).toBe(true);
-      vi.useRealTimers();
     });
   });
 

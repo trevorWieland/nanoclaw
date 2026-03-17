@@ -2,6 +2,33 @@ import path from "path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+describe("parseIntEnv validation", () => {
+  afterEach(() => {
+    delete process.env.CONTAINER_TIMEOUT;
+    delete process.env.CHANNEL_CONNECT_TIMEOUT;
+    vi.resetModules();
+  });
+
+  it("throws on non-numeric env value", async () => {
+    process.env.CONTAINER_TIMEOUT = "abc";
+    await expect(import("./config.js")).rejects.toThrow(
+      'Invalid integer for CONTAINER_TIMEOUT: "abc"',
+    );
+  });
+
+  it("uses env value when set to a valid integer", async () => {
+    process.env.CHANNEL_CONNECT_TIMEOUT = "5000";
+    const mod = await import("./config.js");
+    expect(mod.CHANNEL_CONNECT_TIMEOUT).toBe(5000);
+  });
+
+  it("uses default when env var is not set", async () => {
+    delete process.env.CHANNEL_CONNECT_TIMEOUT;
+    const mod = await import("./config.js");
+    expect(mod.CHANNEL_CONNECT_TIMEOUT).toBe(30000);
+  });
+});
+
 describe("config path resolution", () => {
   afterEach(() => {
     delete process.env.NANOCLAW_CONFIG_ROOT;

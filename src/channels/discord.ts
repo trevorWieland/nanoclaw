@@ -194,6 +194,7 @@ export class DiscordChannel implements Channel {
       }, CHANNEL_CONNECT_TIMEOUT);
 
       this.client!.once(Events.ClientReady, (readyClient) => {
+        if (settled) return;
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           "Discord bot connected",
