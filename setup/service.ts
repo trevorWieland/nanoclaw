@@ -207,10 +207,23 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
     systemctlPrefix = "systemctl --user";
   }
 
+  // Detect stale docker group before generating the unit (user systemd only).
+  // When stale, docker info will never succeed from the systemd session, so
+  // ExecStartPre would block startup indefinitely. Skip it and let
+  // Restart=always handle recovery after the user re-logs.
+  const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
+  if (dockerGroupStale) {
+    logger.warn(
+      "Docker group not active in systemd session — user was likely added to docker group mid-session",
+    );
+  }
+
   // System-level: Requires= pulls Docker into the transaction, After= orders it.
   // User-level: docker.service is invisible to the user manager, so we use
-  // ExecStartPre= to wait for the Docker socket before starting.
+  // ExecStartPre= to wait for the Docker socket before starting (unless the
+  // docker group is stale, in which case the check would never pass).
   const dockerWaitCmd = `/bin/sh -c 'for i in $(seq 1 30); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; echo "Docker not reachable after 60s" >&2; exit 1'`;
+  const useDockerPreStart = !runningAsRoot && !dockerGroupStale;
 
   const unitLines = ["[Unit]", "Description=NanoClaw Personal Assistant"];
   if (runningAsRoot) {
@@ -223,7 +236,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
   unitLines.push("");
   unitLines.push("[Service]");
   unitLines.push("Type=simple");
-  if (!runningAsRoot) {
+  if (useDockerPreStart) {
     unitLines.push(`ExecStartPre=${dockerWaitCmd}`);
   }
   unitLines.push(`ExecStart=${nodePath} ${projectRoot}/dist/index.js`);
@@ -242,14 +255,6 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
 
   fs.writeFileSync(unitPath, unit);
   logger.info({ unitPath }, "Wrote systemd unit");
-
-  // Detect stale docker group before starting (user systemd only)
-  const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
-  if (dockerGroupStale) {
-    logger.warn(
-      "Docker group not active in systemd session — user was likely added to docker group mid-session",
-    );
-  }
 
   // Kill orphaned nanoclaw processes to avoid channel connection conflicts
   killOrphanedProcesses(projectRoot);

@@ -47,8 +47,10 @@ function generateSystemdUnit(
   projectRoot: string,
   homeDir: string,
   isSystem: boolean,
+  dockerGroupStale = false,
 ): string {
   const dockerWaitCmd = `/bin/sh -c 'for i in $(seq 1 30); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; echo "Docker not reachable after 60s" >&2; exit 1'`;
+  const useDockerPreStart = !isSystem && !dockerGroupStale;
 
   const unitLines = ["[Unit]", "Description=NanoClaw Personal Assistant"];
   if (isSystem) {
@@ -61,7 +63,7 @@ function generateSystemdUnit(
   unitLines.push("");
   unitLines.push("[Service]");
   unitLines.push("Type=simple");
-  if (!isSystem) {
+  if (useDockerPreStart) {
     unitLines.push(`ExecStartPre=${dockerWaitCmd}`);
   }
   unitLines.push(`ExecStart=${nodePath} ${projectRoot}/dist/index.js`);
@@ -143,6 +145,17 @@ describe("systemd unit generation", () => {
 
   it("system unit does not have ExecStartPre", () => {
     const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", true);
+    expect(unit).not.toContain("ExecStartPre=");
+  });
+
+  it("user unit skips ExecStartPre when docker group is stale", () => {
+    const unit = generateSystemdUnit(
+      "/usr/bin/node",
+      "/home/user/nanoclaw",
+      "/home/user",
+      false,
+      true,
+    );
     expect(unit).not.toContain("ExecStartPre=");
   });
 });
