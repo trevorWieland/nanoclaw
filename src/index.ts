@@ -750,8 +750,13 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    channels.push(channel);
-    await channel.connect();
+    try {
+      await channel.connect();
+      channels.push(channel);
+    } catch (err) {
+      logger.fatal({ channel: channelName, err }, "Channel failed to connect");
+      process.exit(1);
+    }
   }
   if (channels.length === 0) {
     logger.fatal("No channels connected");
