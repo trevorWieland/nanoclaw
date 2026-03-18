@@ -365,4 +365,36 @@ describe("OAuth token refresh", () => {
     expect(res1.statusCode).toBe(200);
     expect(res2.statusCode).toBe(200);
   });
+
+  it("records auth failure only once for deduplicated failed refresh", async () => {
+    await setupCredentials();
+
+    let rejectFetch: ((err: Error) => void) | undefined;
+    const mockFetch = vi.fn(
+      () =>
+        new Promise<Response>((_, reject) => {
+          rejectFetch = reject;
+        }),
+    );
+    vi.stubGlobal("fetch", mockFetch);
+
+    proxyPort = await startOAuthProxy();
+
+    // Fire three requests concurrently — enough to trip MAX_FAILURES if counted per-waiter
+    const p1 = makeRequest(proxyPort, oauthRequest, "{}");
+    const p2 = makeRequest(proxyPort, oauthRequest, "{}");
+    const p3 = makeRequest(proxyPort, oauthRequest, "{}");
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Reject the single fetch — all three waiters get the failure
+    rejectFetch!(new DOMException("The operation was aborted", "AbortError"));
+
+    await Promise.all([p1, p2, p3]);
+
+    // Only the owner should record the failure, not all three waiters
+    expect(recordAuthFailure).toHaveBeenCalledTimes(1);
+  });
 });

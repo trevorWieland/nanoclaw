@@ -51,7 +51,9 @@ async function refreshOAuthToken(
   if (inflightRefresh) return inflightRefresh;
   inflightRefresh = executeRefresh(refreshToken, credentialsPath, creds);
   try {
-    return await inflightRefresh;
+    const result = await inflightRefresh;
+    if (!result) recordAuthFailure();
+    return result;
   } finally {
     inflightRefresh = null;
   }
@@ -161,9 +163,6 @@ async function resolveOAuthToken(envToken: string | undefined): Promise<string |
 
       if (isExpired && oauth.refreshToken) {
         const refreshed = await refreshOAuthToken(oauth.refreshToken, credentialsPath, creds);
-        if (!refreshed) {
-          recordAuthFailure();
-        }
         return refreshed || oauth.accessToken;
       }
       return oauth.accessToken;
