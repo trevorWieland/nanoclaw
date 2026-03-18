@@ -76,16 +76,20 @@ interface VolumeMount {
  * provide the host-side equivalents. On bare metal, returns the path unchanged.
  */
 function resolveHostPath(internalPath: string): string {
-  if (CONTAINER_HOST_CONFIG_DIR) {
-    const rel = path.relative(CONFIG_ROOT, internalPath);
-    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-      return path.join(CONTAINER_HOST_CONFIG_DIR, rel);
-    }
-  }
+  // Check DATA_DIR first — it is often a subdirectory of CONFIG_ROOT
+  // (e.g., PROJECT_ROOT/data inside PROJECT_ROOT). Checking the more
+  // specific path first prevents data mounts from being misrouted
+  // under CONTAINER_HOST_CONFIG_DIR when both overrides are set.
   if (CONTAINER_HOST_DATA_DIR) {
     const rel = path.relative(DATA_DIR, internalPath);
     if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
       return path.join(CONTAINER_HOST_DATA_DIR, rel);
+    }
+  }
+  if (CONTAINER_HOST_CONFIG_DIR) {
+    const rel = path.relative(CONFIG_ROOT, internalPath);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+      return path.join(CONTAINER_HOST_CONFIG_DIR, rel);
     }
   }
   return internalPath;
