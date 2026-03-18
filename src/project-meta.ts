@@ -11,6 +11,11 @@ import { APP_DIR, DATA_DIR } from "./runtime-paths.js";
 
 export function syncProjectMeta(): void {
   const metaDir = path.join(DATA_DIR, "project-meta");
+
+  // Remove stale files from previous image versions before syncing.
+  // Without this, renamed/deleted docs or skills would persist on
+  // persistent volumes indefinitely.
+  fs.rmSync(metaDir, { recursive: true, force: true });
   fs.mkdirSync(metaDir, { recursive: true });
 
   copyIfExists(path.join(APP_DIR, "CLAUDE.md"), path.join(metaDir, "CLAUDE.md"));

@@ -26,6 +26,7 @@ export const INSTANCE_ID =
 const envConfig = readEnvFile([
   "ASSISTANT_NAME",
   "CHANNEL_CONNECT_TIMEOUT",
+  "CONTAINER_IMAGE",
   "CONTAINER_TIMEOUT",
   "CONTAINER_MAX_OUTPUT_SIZE",
   "CREDENTIAL_PROXY_PORT",
@@ -71,7 +72,7 @@ function parseIntEnv(name: string, fallback: number): number {
 }
 
 export const CHANNEL_CONNECT_TIMEOUT = parseIntEnv("CHANNEL_CONNECT_TIMEOUT", 30000);
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "";
+export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || envConfig.CONTAINER_IMAGE || "";
 export const CONTAINER_TIMEOUT = parseIntEnv("CONTAINER_TIMEOUT", 1800000);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseIntEnv("CONTAINER_MAX_OUTPUT_SIZE", 10485760); // 10MB default
 export const CREDENTIAL_PROXY_PORT = parseIntEnv("CREDENTIAL_PROXY_PORT", 3001);

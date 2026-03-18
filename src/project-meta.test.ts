@@ -12,6 +12,7 @@ vi.mock("./logger.js", () => ({
 const mockFs = vi.hoisted(() => ({
   existsSync: vi.fn((_p?: unknown) => false),
   mkdirSync: vi.fn(),
+  rmSync: vi.fn(),
   copyFileSync: vi.fn(),
   cpSync: vi.fn(),
 }));
@@ -27,6 +28,14 @@ describe("syncProjectMeta", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockFs.existsSync.mockImplementation((_p?: unknown) => false);
+  });
+
+  it("removes stale project-meta before syncing", () => {
+    syncProjectMeta();
+    expect(mockFs.rmSync).toHaveBeenCalledWith("/test/data/project-meta", {
+      recursive: true,
+      force: true,
+    });
   });
 
   it("creates project-meta directory", () => {
