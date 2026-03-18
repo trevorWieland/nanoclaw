@@ -19,7 +19,7 @@
  *   2. ~/.claude/.credentials.json (short-lived, from `/login`)
  *      — auto-refreshed when expired/expiring via OAuth2 refresh_token grant
  */
-import { readFile, writeFile } from "fs/promises";
+import { readFile, rename, writeFile } from "fs/promises";
 import { createServer, Server } from "http";
 import { request as httpsRequest } from "https";
 import { request as httpRequest, RequestOptions } from "http";
@@ -102,7 +102,9 @@ async function executeRefresh(
         if (data.refresh_token) {
           creds.claudeAiOauth.refreshToken = data.refresh_token;
         }
-        await writeFile(credentialsPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+        const tmpPath = `${credentialsPath}.tmp.${process.pid}`;
+        await writeFile(tmpPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+        await rename(tmpPath, credentialsPath);
         logger.info("OAuth token refreshed successfully");
         return data.access_token as string;
       }
