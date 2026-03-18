@@ -57,6 +57,8 @@ COPY docs/ docs/
 # Three-root model: APP_DIR is baked into the image,
 # CONFIG_DIR and DATA_DIR are mounted at runtime.
 ENV NANOCLAW_APP_DIR=/app
+ENV NANOCLAW_CONFIG_ROOT=/config
+ENV NANOCLAW_DATA_DIR=/data
 
 VOLUME ["/data", "/config"]
 EXPOSE 3001

@@ -5,8 +5,10 @@
 #   CONFIG   = ./config (bind mount from homelab repo, has groups/, allowlists)
 #   DATA     = ./data (bind mount for runtime state: db, sessions, cache, logs)
 #
-# Secrets: use a separate env_file for API keys (not committed to git).
-# See env.secrets.example for the template.
+# Secrets (API keys, OAuth tokens) must be in ./config/.env — the credential
+# proxy reads secrets via readEnvFile() from CONFIG_ROOT/.env, NOT from
+# process.env. Do NOT use Docker env_file for secrets; they won't be seen.
+# See env.secrets.example for the template; merge into ./config/.env.
 
 services:
   nanoclaw:
@@ -46,10 +48,6 @@ services:
 
     networks:
       - default
-
-    # Secrets: mount as a separate env_file (gitignored in homelab)
-    # env_file:
-    #   - .env.secrets
 
 networks:
   default:
