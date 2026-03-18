@@ -14,6 +14,7 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  INSTANCE_ID,
   MAX_PROMPT_MESSAGES,
   POLL_INTERVAL,
   TIMEZONE,
@@ -521,7 +522,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info({ instanceId: INSTANCE_ID }, `NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {

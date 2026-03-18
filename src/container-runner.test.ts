@@ -15,6 +15,7 @@ vi.mock("./config.js", () => ({
   DATA_DIR: "/tmp/nanoclaw-test-data",
   GROUPS_DIR: "/tmp/nanoclaw-test-groups",
   IDLE_TIMEOUT: 1800000, // 30min
+  INSTANCE_ID: "test1234",
   TIMEZONE: "America/Los_Angeles",
 }));
 
@@ -168,6 +169,31 @@ describe("container-runner tanren passthrough", () => {
     expect(stdinData).not.toBeNull();
     const parsed = JSON.parse(stdinData!.toString());
     expect(parsed.tanren).toEqual(tanrenConfig);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner instance label", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("adds nanoclaw.instance label to spawn args", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const labelIdx = spawnArgs.indexOf("nanoclaw.instance=test1234");
+    expect(labelIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[labelIdx - 1]).toBe("--label");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
