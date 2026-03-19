@@ -33,7 +33,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null = null;
   private shuttingDown = false;
-  onRetriesExhausted: ((groupJid: string) => void) | null = null;
+  onRetriesExhausted: ((groupJid: string) => void | Promise<void>) | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -264,7 +264,10 @@ export class GroupQueue {
         "Max retries exceeded, dropping messages (will retry on next incoming message)",
       );
       state.retryCount = 0;
-      this.onRetriesExhausted?.(groupJid);
+      // Handler may be async (e.g. persisting state) — catch to prevent unhandled rejections
+      Promise.resolve(this.onRetriesExhausted?.(groupJid))?.catch((err) =>
+        logger.error({ groupJid, err }, "onRetriesExhausted handler failed"),
+      );
       return;
     }
 

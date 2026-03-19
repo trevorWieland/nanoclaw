@@ -9,9 +9,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import Database from "better-sqlite3";
-
-import { STORE_DIR } from "../src/config.js";
+import { closeDatabase, getRegisteredGroupCount, initDatabase } from "../src/db.js";
 import { readEnvFile } from "../src/env.js";
 import { logger } from "../src/logger.js";
 import { getServiceManager, isRoot } from "./platform.js";
@@ -133,20 +131,15 @@ export async function run(_args: string[]): Promise<void> {
   const configuredChannels = Object.keys(channelAuth);
   const anyChannelConfigured = configuredChannels.length > 0;
 
-  // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
+  // 5. Check registered groups (via DataStore)
   let registeredGroups = 0;
-  const dbPath = path.join(STORE_DIR, "messages.db");
-  if (fs.existsSync(dbPath)) {
-    try {
-      const db = new Database(dbPath, { readonly: true });
-      const row = db.prepare("SELECT COUNT(*) as count FROM registered_groups").get() as {
-        count: number;
-      };
-      registeredGroups = row.count;
-      db.close();
-    } catch {
-      // Table might not exist
-    }
+  try {
+    await initDatabase();
+    registeredGroups = await getRegisteredGroupCount();
+  } catch {
+    // Table might not exist
+  } finally {
+    await closeDatabase();
   }
 
   // 6. Check mount allowlist

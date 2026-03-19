@@ -147,7 +147,7 @@ export class DiscordChannel implements Channel {
 
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, "discord", isGroup);
+      await this.opts.onChatMetadata(chatJid, timestamp, chatName, "discord", isGroup);
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
@@ -157,7 +157,7 @@ export class DiscordChannel implements Channel {
       }
 
       // Deliver message — startMessageLoop() will pick it up
-      this.opts.onMessage(chatJid, {
+      await this.opts.onMessage(chatJid, {
         id: msgId,
         chat_jid: chatJid,
         sender,

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import fs from "fs";
 
-import Database from "better-sqlite3";
+import { _initTestDatabase, setRegisteredGroup, getRegisteredGroupCount } from "../src/db.js";
 
 /**
  * Tests for the environment check step.
@@ -18,43 +18,34 @@ describe("environment detection", () => {
 });
 
 describe("registered groups DB query", () => {
-  let db: Database.Database;
-
-  beforeEach(() => {
-    db = new Database(":memory:");
-    db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
-      trigger_pattern TEXT NOT NULL,
-      added_at TEXT NOT NULL,
-      container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
-    )`);
+  beforeEach(async () => {
+    await _initTestDatabase();
   });
 
-  it("returns 0 for empty table", () => {
-    const row = db.prepare("SELECT COUNT(*) as count FROM registered_groups").get() as {
-      count: number;
-    };
-    expect(row.count).toBe(0);
+  it("returns 0 for empty table", async () => {
+    const count = await getRegisteredGroupCount();
+    expect(count).toBe(0);
   });
 
-  it("returns correct count after inserts", () => {
-    db.prepare(
-      `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run("123@g.us", "Group 1", "group-1", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+  it("returns correct count after inserts", async () => {
+    await setRegisteredGroup("123@g.us", {
+      name: "Group 1",
+      folder: "group-1",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
-    db.prepare(
-      `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run("456@g.us", "Group 2", "group-2", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+    await setRegisteredGroup("456@g.us", {
+      name: "Group 2",
+      folder: "group-2",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
-    const row = db.prepare("SELECT COUNT(*) as count FROM registered_groups").get() as {
-      count: number;
-    };
-    expect(row.count).toBe(2);
+    const count = await getRegisteredGroupCount();
+    expect(count).toBe(2);
   });
 });
 

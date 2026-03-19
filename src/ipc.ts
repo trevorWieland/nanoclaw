@@ -22,9 +22,9 @@ import { RegisteredGroup } from "./types.js";
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  registerGroup: (jid: string, group: RegisteredGroup) => void;
+  registerGroup: (jid: string, group: RegisteredGroup) => Promise<void>;
   syncGroups: (force: boolean) => Promise<void>;
-  getAvailableGroups: () => AvailableGroup[];
+  getAvailableGroups: () => Promise<AvailableGroup[]>;
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
@@ -217,7 +217,7 @@ export async function processTaskIpc(
           data.context_mode === "group" || data.context_mode === "isolated"
             ? data.context_mode
             : "isolated";
-        createTask({
+        await createTask({
           id: taskId,
           group_folder: targetFolder,
           chat_jid: targetJid,
@@ -235,9 +235,9 @@ export async function processTaskIpc(
 
     case "pause_task":
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: "paused" });
+          await updateTask(data.taskId, { status: "paused" });
           logger.info({ taskId: data.taskId, sourceGroup }, "Task paused via IPC");
         } else {
           logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task pause attempt");
@@ -247,9 +247,9 @@ export async function processTaskIpc(
 
     case "resume_task":
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: "active" });
+          await updateTask(data.taskId, { status: "active" });
           logger.info({ taskId: data.taskId, sourceGroup }, "Task resumed via IPC");
         } else {
           logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task resume attempt");
@@ -259,9 +259,9 @@ export async function processTaskIpc(
 
     case "cancel_task":
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
+          await deleteTask(data.taskId);
           logger.info({ taskId: data.taskId, sourceGroup }, "Task cancelled via IPC");
         } else {
           logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task cancel attempt");
@@ -271,7 +271,7 @@ export async function processTaskIpc(
 
     case "update_task":
       if (data.taskId) {
-        const task = getTaskById(data.taskId);
+        const task = await getTaskById(data.taskId);
         if (!task) {
           logger.warn({ taskId: data.taskId, sourceGroup }, "Task not found for update");
           break;
@@ -314,7 +314,7 @@ export async function processTaskIpc(
           }
         }
 
-        updateTask(data.taskId, updates);
+        await updateTask(data.taskId, updates);
         logger.info({ taskId: data.taskId, sourceGroup, updates }, "Task updated via IPC");
       }
       break;
@@ -325,7 +325,7 @@ export async function processTaskIpc(
         logger.info({ sourceGroup }, "Group metadata refresh requested via IPC");
         await deps.syncGroups(true);
         // Write updated snapshot immediately
-        const availableGroups = deps.getAvailableGroups();
+        const availableGroups = await deps.getAvailableGroups();
         deps.writeGroupsSnapshot(
           sourceGroup,
           true,
@@ -352,7 +352,7 @@ export async function processTaskIpc(
           break;
         }
         // Defense in depth: agent cannot set isMain via IPC
-        deps.registerGroup(data.jid, {
+        await deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
           trigger: data.trigger,

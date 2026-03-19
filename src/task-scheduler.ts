@@ -78,12 +78,12 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     // Stop retry churn for malformed legacy rows.
-    updateTask(task.id, { status: "paused" });
+    await updateTask(task.id, { status: "paused" });
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder, error },
       "Task has invalid group folder",
     );
-    logTaskRun({
+    await logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
@@ -102,7 +102,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   if (!group) {
     logger.error({ taskId: task.id, groupFolder: task.group_folder }, "Group not found for task");
-    logTaskRun({
+    await logTaskRun({
       task_id: task.id,
       run_at: new Date().toISOString(),
       duration_ms: Date.now() - startTime,
@@ -115,7 +115,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
-  const tasks = getAllTasks();
+  const tasks = await getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
     isMain,
@@ -211,7 +211,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   const durationMs = Date.now() - startTime;
 
-  logTaskRun({
+  await logTaskRun({
     task_id: task.id,
     run_at: new Date().toISOString(),
     duration_ms: durationMs,
@@ -222,7 +222,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   // Auto-pause on auth error — prevent retry storms
   if (error && isAuthError(error)) {
-    updateTask(task.id, { status: "paused" });
+    await updateTask(task.id, { status: "paused" });
     try {
       await deps.sendMessage(
         task.chat_jid,
@@ -237,7 +237,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
 
   const nextRun = computeNextRun(task);
   const resultSummary = error ? `Error: ${error}` : result ? result.slice(0, 200) : "Completed";
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+  await updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
 let schedulerRunning = false;
@@ -252,14 +252,14 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 
   const loop = async () => {
     try {
-      const dueTasks = getDueTasks();
+      const dueTasks = await getDueTasks();
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, "Found due tasks");
       }
 
       for (const task of dueTasks) {
         // Re-check task status in case it was paused/cancelled
-        const currentTask = getTaskById(task.id);
+        const currentTask = await getTaskById(task.id);
         if (!currentTask || currentTask.status !== "active") {
           continue;
         }

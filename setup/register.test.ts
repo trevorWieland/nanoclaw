@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 
-import Database from "better-sqlite3";
+import {
+  _initTestDatabase,
+  setRegisteredGroup,
+  getRegisteredGroup,
+  getAllRegisteredGroups,
+} from "../src/db.js";
 
 /**
  * Tests for the register step.
@@ -9,158 +14,140 @@ import Database from "better-sqlite3";
  * apostrophe in names, .env updates.
  */
 
-function createTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-    jid TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    folder TEXT NOT NULL UNIQUE,
-    trigger_pattern TEXT NOT NULL,
-    added_at TEXT NOT NULL,
-    container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1,
-    is_main INTEGER DEFAULT 0
-  )`);
-  return db;
-}
-
 describe("parameterized SQL registration", () => {
-  let db: Database.Database;
-
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    await _initTestDatabase();
   });
 
-  it("registers a group with parameterized query", () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run("123@g.us", "Test Group", "test-group", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+  it("registers a group with parameterized query", async () => {
+    await setRegisteredGroup("123@g.us", {
+      name: "Test Group",
+      folder: "test-group",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
-    const row = db.prepare("SELECT * FROM registered_groups WHERE jid = ?").get("123@g.us") as {
-      jid: string;
-      name: string;
-      folder: string;
-      trigger_pattern: string;
-      requires_trigger: number;
-    };
+    const row = await getRegisteredGroup("123@g.us");
 
-    expect(row.jid).toBe("123@g.us");
-    expect(row.name).toBe("Test Group");
-    expect(row.folder).toBe("test-group");
-    expect(row.trigger_pattern).toBe("@Andy");
-    expect(row.requires_trigger).toBe(1);
+    expect(row).toBeDefined();
+    expect(row!.jid).toBe("123@g.us");
+    expect(row!.name).toBe("Test Group");
+    expect(row!.folder).toBe("test-group");
+    expect(row!.trigger).toBe("@Andy");
+    expect(row!.requiresTrigger).toBe(true);
   });
 
-  it("handles apostrophes in group names safely", () => {
+  it("handles apostrophes in group names safely", async () => {
     const name = "O'Brien's Group";
 
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run("456@g.us", name, "obriens-group", "@Andy", "2024-01-01T00:00:00.000Z", 0);
+    await setRegisteredGroup("456@g.us", {
+      name,
+      folder: "obriens-group",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: false,
+    });
 
-    const row = db.prepare("SELECT name FROM registered_groups WHERE jid = ?").get("456@g.us") as {
-      name: string;
-    };
+    const row = await getRegisteredGroup("456@g.us");
 
-    expect(row.name).toBe(name);
+    expect(row).toBeDefined();
+    expect(row!.name).toBe(name);
   });
 
-  it("prevents SQL injection in JID field", () => {
+  it("prevents SQL injection in JID field", async () => {
     const maliciousJid = "'; DROP TABLE registered_groups; --";
 
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(maliciousJid, "Evil", "evil", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+    await setRegisteredGroup(maliciousJid, {
+      name: "Evil",
+      folder: "evil",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
     // Table should still exist and have the row
-    const count = db.prepare("SELECT COUNT(*) as count FROM registered_groups").get() as {
-      count: number;
-    };
-    expect(count.count).toBe(1);
+    const groups = await getAllRegisteredGroups();
+    const keys = Object.keys(groups);
+    expect(keys).toHaveLength(1);
 
-    const row = db.prepare("SELECT jid FROM registered_groups").get() as {
-      jid: string;
-    };
-    expect(row.jid).toBe(maliciousJid);
+    const row = await getRegisteredGroup(maliciousJid);
+    expect(row).toBeDefined();
+    expect(row!.jid).toBe(maliciousJid);
   });
 
-  it("handles requiresTrigger=false", () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run("789@s.whatsapp.net", "Personal", "main", "@Andy", "2024-01-01T00:00:00.000Z", 0);
+  it("handles requiresTrigger=false", async () => {
+    await setRegisteredGroup("789@s.whatsapp.net", {
+      name: "Personal",
+      folder: "main",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: false,
+    });
 
-    const row = db
-      .prepare("SELECT requires_trigger FROM registered_groups WHERE jid = ?")
-      .get("789@s.whatsapp.net") as { requires_trigger: number };
+    const row = await getRegisteredGroup("789@s.whatsapp.net");
 
-    expect(row.requires_trigger).toBe(0);
+    expect(row).toBeDefined();
+    expect(row!.requiresTrigger).toBe(false);
   });
 
-  it("stores is_main flag", () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
-    ).run(
-      "789@s.whatsapp.net",
-      "Personal",
-      "whatsapp_main",
-      "@Andy",
-      "2024-01-01T00:00:00.000Z",
-      0,
-      1,
-    );
+  it("stores is_main flag", async () => {
+    await setRegisteredGroup("789@s.whatsapp.net", {
+      name: "Personal",
+      folder: "whatsapp_main",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: false,
+      isMain: true,
+    });
 
-    const row = db
-      .prepare("SELECT is_main FROM registered_groups WHERE jid = ?")
-      .get("789@s.whatsapp.net") as { is_main: number };
+    const row = await getRegisteredGroup("789@s.whatsapp.net");
 
-    expect(row.is_main).toBe(1);
+    expect(row).toBeDefined();
+    expect(row!.isMain).toBe(true);
   });
 
-  it("defaults is_main to 0", () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run("123@g.us", "Some Group", "whatsapp_some-group", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+  it("defaults is_main to false", async () => {
+    await setRegisteredGroup("123@g.us", {
+      name: "Some Group",
+      folder: "whatsapp_some-group",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
-    const row = db
-      .prepare("SELECT is_main FROM registered_groups WHERE jid = ?")
-      .get("123@g.us") as { is_main: number };
+    const row = await getRegisteredGroup("123@g.us");
 
-    expect(row.is_main).toBe(0);
+    expect(row).toBeDefined();
+    expect(row!.isMain).toBeFalsy();
   });
 
-  it("upserts on conflict", () => {
-    const stmt = db.prepare(
-      `INSERT OR REPLACE INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    );
+  it("upserts on conflict", async () => {
+    await setRegisteredGroup("123@g.us", {
+      name: "Original",
+      folder: "main",
+      trigger: "@Andy",
+      added_at: "2024-01-01T00:00:00.000Z",
+      requiresTrigger: true,
+    });
 
-    stmt.run("123@g.us", "Original", "main", "@Andy", "2024-01-01T00:00:00.000Z", 1);
-    stmt.run("123@g.us", "Updated", "main", "@Bot", "2024-02-01T00:00:00.000Z", 0);
+    await setRegisteredGroup("123@g.us", {
+      name: "Updated",
+      folder: "main",
+      trigger: "@Bot",
+      added_at: "2024-02-01T00:00:00.000Z",
+      requiresTrigger: false,
+    });
 
-    const rows = db.prepare("SELECT * FROM registered_groups").all();
-    expect(rows).toHaveLength(1);
+    const groups = await getAllRegisteredGroups();
+    const keys = Object.keys(groups);
+    expect(keys).toHaveLength(1);
 
-    const row = rows[0] as {
-      name: string;
-      trigger_pattern: string;
-      requires_trigger: number;
-    };
-    expect(row.name).toBe("Updated");
-    expect(row.trigger_pattern).toBe("@Bot");
-    expect(row.requires_trigger).toBe(0);
+    const row = await getRegisteredGroup("123@g.us");
+    expect(row).toBeDefined();
+    expect(row!.name).toBe("Updated");
+    expect(row!.trigger).toBe("@Bot");
+    expect(row!.requiresTrigger).toBe(false);
   });
 });
 

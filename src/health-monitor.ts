@@ -33,8 +33,8 @@ export interface HealthSource {
 export interface HealthMonitorDeps {
   sources: HealthSource[];
   sendEmbed: (jid: string, embed: DiscordEmbed) => Promise<void>;
-  getState: (key: string) => string | undefined;
-  setState: (key: string, value: string) => void;
+  getState: (key: string) => Promise<string | undefined>;
+  setState: (key: string, value: string) => Promise<void>;
   config: HealthMonitorConfig;
 }
 
@@ -49,13 +49,15 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
 
   const lastHealthState = new Map<string, boolean>();
 
-  // Initialize from persisted state
-  for (const source of deps.sources) {
-    const persisted = deps.getState(`health_status_${source.name}`);
-    if (persisted !== undefined) {
-      lastHealthState.set(source.name, persisted === "true");
+  const init = async () => {
+    // Initialize from persisted state
+    for (const source of deps.sources) {
+      const persisted = await deps.getState(`health_status_${source.name}`);
+      if (persisted !== undefined) {
+        lastHealthState.set(source.name, persisted === "true");
+      }
     }
-  }
+  };
 
   const poll = async () => {
     for (const source of deps.sources) {
@@ -67,7 +69,16 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
     }
   };
 
-  setTimeout(poll, 0);
+  // Init then start polling — errors are caught to prevent unhandled rejections
+  init()
+    .then(() => setTimeout(poll, 0))
+    .catch((err) => {
+      logger.error(
+        { err },
+        "Health monitor: failed to initialize persisted state, starting with empty state",
+      );
+      setTimeout(poll, 0);
+    });
 }
 
 async function pollSource(
@@ -100,12 +111,12 @@ async function pollSource(
         // If all sends failed, keep previous state so the transition retries next poll.
         if (anySendSucceeded || jids.length === 0) {
           lastHealthState.set(source.name, status.healthy);
-          deps.setState(`health_status_${source.name}`, String(status.healthy));
+          await deps.setState(`health_status_${source.name}`, String(status.healthy));
         }
       } else {
         // No transition — still commit current state (idempotent, no notification needed)
         lastHealthState.set(source.name, status.healthy);
-        deps.setState(`health_status_${source.name}`, String(status.healthy));
+        await deps.setState(`health_status_${source.name}`, String(status.healthy));
       }
     }
   } catch (err) {
@@ -116,14 +127,14 @@ async function pollSource(
   // Event polling
   try {
     const cursorKey = `events_cursor_${source.name}`;
-    const rawCursor = deps.getState(cursorKey) ?? null;
+    const rawCursor = (await deps.getState(cursorKey)) ?? null;
     const { events, cursor: newCursor } = await source.fetchEvents(rawCursor);
 
     // On first run (rawCursor was null), skip posting — cursor was just initialized.
     // Commit cursor immediately since there's nothing to deliver.
     if (rawCursor === null) {
       if (newCursor !== null) {
-        deps.setState(cursorKey, newCursor);
+        await deps.setState(cursorKey, newCursor);
       }
     } else {
       let allDelivered = true;
@@ -149,7 +160,7 @@ async function pollSource(
       // Only advance cursor after successful delivery.
       // If any event failed all sends, keep old cursor to retry next poll.
       if (allDelivered && newCursor !== null) {
-        deps.setState(cursorKey, newCursor);
+        await deps.setState(cursorKey, newCursor);
       }
     }
   } catch (err) {
