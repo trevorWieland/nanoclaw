@@ -71,6 +71,7 @@ import {
 import { syncProjectMeta } from "./project-meta.js";
 import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
+import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
 import { loadHealthMonitorConfig } from "./health-monitor-config.js";
@@ -379,71 +380,36 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === "error" || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
-      logger.warn(
-        { group: group.name },
-        "Agent error after output was sent, skipping cursor rollback to prevent duplicates",
-      );
-      if (truncated) {
-        // Marker already persisted at cursor-advance time.
-        queue.enqueueMessageCheck(chatJid);
-      } else if (isTailDrain) {
-        await savePendingTailDrain();
-        queue.enqueueMessageCheck(chatJid);
-      } else if (wasTailDrain) {
-        await savePendingTailDrain();
-      }
-      return true;
-    }
-    // Roll back cursor so retries can re-process these messages
+  const decision = decideCursorAction({
+    hadError: output === "error" || hadError,
+    hadSendError,
+    outputSentToUser,
+    truncated,
+    isTailDrain,
+    wasTailDrain,
+  });
+
+  if (decision.shouldRollback) {
     lastAgentTimestamp[chatJid] = previousCursor;
     await saveState();
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
-      await savePendingTailDrain();
-    } else if (truncated) {
-      // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
-      pendingTailDrain.delete(chatJid);
-      await savePendingTailDrain();
-    } else if (wasTailDrain) {
-      await savePendingTailDrain();
     }
-    logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
-    return false;
+    if (decision.shouldClearTailDrain) {
+      pendingTailDrain.delete(chatJid);
+    }
+    logger.warn({ group: group.name }, "Cursor rolled back for retry");
   }
 
-  // Agent succeeded but channel delivery failed — roll back cursor for retry.
-  // Only roll back if no output reached the user (avoid duplicate sends).
-  if (hadSendError && !outputSentToUser) {
-    lastAgentTimestamp[chatJid] = previousCursor;
-    await saveState();
-    if (isTailDrain) {
-      pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
-      await savePendingTailDrain();
-    } else if (truncated) {
-      // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
-      pendingTailDrain.delete(chatJid);
-      await savePendingTailDrain();
-    } else if (wasTailDrain) {
-      await savePendingTailDrain();
-    }
-    logger.warn({ group: group.name }, "All channel sends failed, rolled back cursor for retry");
-    return false;
+  if (decision.shouldPersistTailDrain) {
+    await savePendingTailDrain();
   }
 
-  if (truncated) {
-    // Marker already persisted at cursor-advance time; just enqueue continuation.
+  if (decision.shouldEnqueue) {
     queue.enqueueMessageCheck(chatJid);
-  } else if (isTailDrain) {
-    await savePendingTailDrain();
-    queue.enqueueMessageCheck(chatJid);
-  } else if (wasTailDrain) {
-    await savePendingTailDrain();
   }
-  return true;
+
+  return decision.succeeded;
 }
 
 async function runAgent(

@@ -41,6 +41,12 @@ const RESET_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 let consecutiveFailures = 0;
 let circuitOpenSince: number | null = null;
 
+/** @internal - for tests only. */
+export function _resetAuthCircuitBreakerForTests(): void {
+  consecutiveFailures = 0;
+  circuitOpenSince = null;
+}
+
 export function recordAuthFailure(): void {
   consecutiveFailures++;
   logger.warn({ consecutiveFailures, max: MAX_FAILURES }, "Auth failure recorded");

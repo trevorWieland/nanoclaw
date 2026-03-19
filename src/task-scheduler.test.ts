@@ -94,6 +94,74 @@ describe("task scheduler", () => {
     expect(computeNextRun(task)).toBeNull();
   });
 
+  it("computeNextRun with cron type returns valid future date", () => {
+    const task = {
+      id: "cron-test",
+      group_folder: "test",
+      chat_jid: "test@g.us",
+      prompt: "test",
+      schedule_type: "cron" as const,
+      schedule_value: "0 9 * * *",
+      context_mode: "isolated" as const,
+      next_run: new Date(Date.now() - 1000).toISOString(),
+      last_run: null,
+      last_result: null,
+      status: "active" as const,
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).not.toBeNull();
+    expect(new Date(nextRun!).getTime()).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it("computeNextRun with NaN interval returns 60s fallback", () => {
+    const task = {
+      id: "nan-test",
+      group_folder: "test",
+      chat_jid: "test@g.us",
+      prompt: "test",
+      schedule_type: "interval" as const,
+      schedule_value: "not-a-number",
+      context_mode: "isolated" as const,
+      next_run: new Date(Date.now() - 1000).toISOString(),
+      last_run: null,
+      last_result: null,
+      status: "active" as const,
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).not.toBeNull();
+    const delta = new Date(nextRun!).getTime() - Date.now();
+    // Should be ~60 seconds from now
+    expect(delta).toBeGreaterThanOrEqual(59000);
+    expect(delta).toBeLessThanOrEqual(61000);
+  });
+
+  it("computeNextRun with zero interval returns 60s fallback", () => {
+    const task = {
+      id: "zero-test",
+      group_folder: "test",
+      chat_jid: "test@g.us",
+      prompt: "test",
+      schedule_type: "interval" as const,
+      schedule_value: "0",
+      context_mode: "isolated" as const,
+      next_run: new Date(Date.now() - 1000).toISOString(),
+      last_run: null,
+      last_result: null,
+      status: "active" as const,
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
+
+    const nextRun = computeNextRun(task);
+    expect(nextRun).not.toBeNull();
+    const delta = new Date(nextRun!).getTime() - Date.now();
+    expect(delta).toBeGreaterThanOrEqual(59000);
+    expect(delta).toBeLessThanOrEqual(61000);
+  });
+
   it("computeNextRun skips missed intervals without infinite loop", () => {
     // Task was due 10 intervals ago (missed)
     const ms = 60000;

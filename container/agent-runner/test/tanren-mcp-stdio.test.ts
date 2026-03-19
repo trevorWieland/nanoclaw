@@ -114,6 +114,57 @@ describe("tanren-mcp-stdio — tanrenFetch logic", () => {
   });
 });
 
+describe("tanren-mcp-stdio — tanrenFetch edge cases", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("POST body is JSON-serialized", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "{}",
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const body = { project: "my/repo", phase: "do-task" };
+    await tanrenFetch("http://tanren:8000", "key", "POST", "/api/v1/dispatch", body);
+
+    expect(mockFetch.mock.calls[0][1].body).toBe(JSON.stringify(body));
+  });
+
+  it("non-JSON error body is included in error message", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => "Bad Gateway",
+    }) as unknown as typeof fetch;
+
+    await expect(tanrenFetch("http://tanren:8000", "key", "GET", "/api/v1/health")).rejects.toThrow(
+      "Bad Gateway",
+    );
+  });
+
+  it("uses AbortSignal.timeout", async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "{}",
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    await tanrenFetch("http://tanren:8000", "key", "GET", "/api/v1/health");
+
+    expect(mockFetch.mock.calls[0][1].signal).toBeDefined();
+  });
+});
+
 describe("tanren-mcp-stdio — tool response format", () => {
   it("ok() wraps data as JSON text content", () => {
     const result = ok({ status: "healthy" });
@@ -133,5 +184,35 @@ describe("tanren-mcp-stdio — tool response format", () => {
     const result = err("something went wrong");
     expect(result.content[0].text).toBe("something went wrong");
     expect(result.isError).toBe(true);
+  });
+
+  it("ok() pretty-prints with 2-space indent", () => {
+    const result = ok({ a: 1 });
+    expect(result.content[0].text).toBe(JSON.stringify({ a: 1 }, null, 2));
+  });
+
+  it("err() handles non-Error non-string values", () => {
+    const result = err(42);
+    expect(result.content[0].text).toBe("42");
+    expect(result.isError).toBe(true);
+  });
+
+  it("TOOL_NAMES contains all expected tools", () => {
+    const expected = [
+      "tanren_health",
+      "tanren_dispatch",
+      "tanren_dispatch_status",
+      "tanren_cancel",
+      "tanren_provision",
+      "tanren_execute",
+      "tanren_teardown",
+      "tanren_run_full",
+      "tanren_run_status",
+      "tanren_vm_list",
+      "tanren_vm_release",
+      "tanren_config",
+      "tanren_events",
+    ];
+    expect(TOOL_NAMES).toEqual(expected);
   });
 });

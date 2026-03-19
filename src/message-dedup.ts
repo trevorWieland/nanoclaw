@@ -77,6 +77,11 @@ export function shouldSend(groupId: string, message: string): boolean {
   return entry.count < MAX_DUPLICATES;
 }
 
+/** @internal - for tests only. */
+export function _resetDedupForTests(): void {
+  dedupState.clear();
+}
+
 /**
  * Record that a message was sent (call after actually sending).
  */

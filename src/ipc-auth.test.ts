@@ -635,3 +635,173 @@ describe("register_group success", () => {
     expect(await getRegisteredGroup("partial@g.us")).toBeUndefined();
   });
 });
+
+// --- update_task authorization ---
+
+describe("update_task authorization", () => {
+  beforeEach(async () => {
+    await createTask({
+      id: "task-update-main",
+      group_folder: "whatsapp_main",
+      chat_jid: "main@g.us",
+      prompt: "original prompt",
+      schedule_type: "interval",
+      schedule_value: "3600000",
+      context_mode: "isolated",
+      next_run: new Date(Date.now() + 3600000).toISOString(),
+      status: "active",
+      created_at: "2024-01-01T00:00:00.000Z",
+    });
+    await createTask({
+      id: "task-update-other",
+      group_folder: "other-group",
+      chat_jid: "other@g.us",
+      prompt: "other prompt",
+      schedule_type: "interval",
+      schedule_value: "3600000",
+      context_mode: "isolated",
+      next_run: new Date(Date.now() + 3600000).toISOString(),
+      status: "active",
+      created_at: "2024-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("main group can update any task", async () => {
+    await processTaskIpc(
+      { type: "update_task", taskId: "task-update-other", prompt: "updated" },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    expect((await getTaskById("task-update-other"))!.prompt).toBe("updated");
+  });
+
+  it("non-main group can update its own task", async () => {
+    await processTaskIpc(
+      { type: "update_task", taskId: "task-update-other", prompt: "self-updated" },
+      "other-group",
+      false,
+      deps,
+    );
+    expect((await getTaskById("task-update-other"))!.prompt).toBe("self-updated");
+  });
+
+  it("non-main group cannot update another group's task", async () => {
+    await processTaskIpc(
+      { type: "update_task", taskId: "task-update-main", prompt: "hacked" },
+      "other-group",
+      false,
+      deps,
+    );
+    expect((await getTaskById("task-update-main"))!.prompt).toBe("original prompt");
+  });
+
+  it("returns early when task not found", async () => {
+    await processTaskIpc(
+      { type: "update_task", taskId: "nonexistent", prompt: "x" },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    // No crash = success
+  });
+});
+
+describe("update_task field updates", () => {
+  beforeEach(async () => {
+    await createTask({
+      id: "task-field-test",
+      group_folder: "whatsapp_main",
+      chat_jid: "main@g.us",
+      prompt: "original",
+      schedule_type: "interval",
+      schedule_value: "3600000",
+      context_mode: "isolated",
+      next_run: new Date(Date.now() + 3600000).toISOString(),
+      status: "active",
+      created_at: "2024-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("updates prompt only", async () => {
+    await processTaskIpc(
+      { type: "update_task", taskId: "task-field-test", prompt: "new prompt" },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    const task = await getTaskById("task-field-test");
+    expect(task!.prompt).toBe("new prompt");
+    expect(task!.schedule_type).toBe("interval");
+  });
+
+  it("updates schedule_type and schedule_value together", async () => {
+    await processTaskIpc(
+      {
+        type: "update_task",
+        taskId: "task-field-test",
+        schedule_type: "cron",
+        schedule_value: "0 9 * * *",
+      },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    const task = await getTaskById("task-field-test");
+    expect(task!.schedule_type).toBe("cron");
+    expect(task!.schedule_value).toBe("0 9 * * *");
+  });
+
+  it("recomputes next_run on interval update", async () => {
+    const before = Date.now();
+    await processTaskIpc(
+      {
+        type: "update_task",
+        taskId: "task-field-test",
+        schedule_value: "7200000",
+      },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    const task = await getTaskById("task-field-test");
+    const nextRun = new Date(task!.next_run!).getTime();
+    expect(nextRun).toBeGreaterThanOrEqual(before + 7200000 - 1000);
+  });
+
+  it("recomputes next_run on cron update", async () => {
+    await processTaskIpc(
+      {
+        type: "update_task",
+        taskId: "task-field-test",
+        schedule_type: "cron",
+        schedule_value: "0 12 * * *",
+      },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    const task = await getTaskById("task-field-test");
+    expect(task!.next_run).toBeTruthy();
+    expect(new Date(task!.next_run!).getTime()).toBeGreaterThan(Date.now() - 60000);
+  });
+
+  it("rejects invalid cron in update", async () => {
+    const originalNextRun = (await getTaskById("task-field-test"))!.next_run;
+    await processTaskIpc(
+      {
+        type: "update_task",
+        taskId: "task-field-test",
+        schedule_type: "cron",
+        schedule_value: "bad cron",
+      },
+      "whatsapp_main",
+      true,
+      deps,
+    );
+    // Task should remain unchanged (update broke out early)
+    const task = await getTaskById("task-field-test");
+    expect(task!.schedule_type).toBe("interval");
+    expect(task!.next_run).toBe(originalNextRun);
+  });
+});
