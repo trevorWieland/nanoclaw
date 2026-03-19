@@ -24,7 +24,7 @@ RUN pnpm run build
 # Prune dev dependencies so node_modules is production-ready.
 # This keeps the already-compiled better-sqlite3 native module
 # without needing build tools in the production stage.
-RUN pnpm prune --prod
+RUN pnpm prune --prod --ignore-scripts
 
 # --- Production stage ---
 FROM node:24-slim
