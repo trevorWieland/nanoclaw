@@ -40,6 +40,18 @@ export interface HealthMonitorDeps {
 
 let monitorRunning = false;
 
+const cachedHealthStatus = new Map<string, HealthStatus>();
+const MAX_RECENT_EVENTS = 100;
+const recentEvents: HealthEvent[] = [];
+
+export function getHealthSnapshot(): ReadonlyMap<string, HealthStatus> {
+  return cachedHealthStatus;
+}
+
+export function getRecentEvents(): readonly HealthEvent[] {
+  return recentEvents;
+}
+
 export function startHealthMonitor(deps: HealthMonitorDeps): void {
   if (monitorRunning) {
     logger.debug("Health monitor already running, skipping duplicate start");
@@ -90,6 +102,7 @@ async function pollSource(
   try {
     const status = await source.checkHealth();
     if (status) {
+      cachedHealthStatus.set(source.name, status);
       const previous = lastHealthState.get(source.name) ?? null;
 
       // Only post on state transitions or first-check-unhealthy
@@ -121,6 +134,12 @@ async function pollSource(
     }
   } catch (err) {
     logger.error({ source: source.name, err }, "Health monitor: checkHealth threw");
+    cachedHealthStatus.set(source.name, {
+      source: source.name,
+      healthy: false,
+      message: err instanceof Error ? err.message : String(err),
+      checkedAt: new Date(),
+    });
     await sendErrorEmbed(deps, source.name, "Health check error", err);
   }
 
@@ -138,6 +157,7 @@ async function pollSource(
       }
     } else {
       let allDelivered = true;
+      const deliveredEvents: HealthEvent[] = [];
       for (const event of events) {
         const embed = formatEventEmbed(event);
         const jids = resolveJids(deps.config, event.type, source.name);
@@ -153,14 +173,21 @@ async function pollSource(
             );
           }
         }
-        if (!eventDelivered) {
+        if (eventDelivered) {
+          deliveredEvents.push(event);
+        } else {
           allDelivered = false;
         }
       }
-      // Only advance cursor after successful delivery.
-      // If any event failed all sends, keep old cursor to retry next poll.
+      // Only advance cursor and cache events after all deliveries succeed.
+      // If any event failed all sends, keep old cursor to retry next poll —
+      // caching before commit would produce duplicates on the retry.
       if (allDelivered && newCursor !== null) {
         await deps.setState(cursorKey, newCursor);
+        for (const event of deliveredEvents) {
+          recentEvents.push(event);
+          if (recentEvents.length > MAX_RECENT_EVENTS) recentEvents.shift();
+        }
       }
     }
   } catch (err) {
@@ -189,4 +216,6 @@ async function sendErrorEmbed(
 /** @internal - for tests only. */
 export function _resetHealthMonitorForTests(): void {
   monitorRunning = false;
+  cachedHealthStatus.clear();
+  recentEvents.length = 0;
 }

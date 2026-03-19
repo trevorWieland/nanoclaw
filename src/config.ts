@@ -30,6 +30,8 @@ const envConfig = readEnvFile([
   "CONTAINER_TIMEOUT",
   "CONTAINER_MAX_OUTPUT_SIZE",
   "CREDENTIAL_PROXY_PORT",
+  "STATUS_PORT",
+  "STATUS_BIND_HOST",
   "DB_BACKEND",
   "DATABASE_URL",
   "IDLE_TIMEOUT",
@@ -78,6 +80,9 @@ export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || envConfig.CONTAINE
 export const CONTAINER_TIMEOUT = parseIntEnv("CONTAINER_TIMEOUT", 1800000);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseIntEnv("CONTAINER_MAX_OUTPUT_SIZE", 10485760); // 10MB default
 export const CREDENTIAL_PROXY_PORT = parseIntEnv("CREDENTIAL_PROXY_PORT", 3001);
+export const STATUS_PORT = parseIntEnv("STATUS_PORT", 3002);
+export const STATUS_BIND_HOST =
+  process.env.STATUS_BIND_HOST || envConfig.STATUS_BIND_HOST || "127.0.0.1";
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseIntEnv("IDLE_TIMEOUT", 1800000); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseIntEnv("MAX_CONCURRENT_CONTAINERS", 5));

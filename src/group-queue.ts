@@ -25,6 +25,30 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  lastError: string | null;
+  lastErrorAt: Date | null;
+  errorCount: number;
+}
+
+export interface QueueSnapshot {
+  activeCount: number;
+  maxConcurrent: number;
+  waitingCount: number;
+  groups: Record<string, GroupSnapshot>;
+}
+
+export interface GroupSnapshot {
+  active: boolean;
+  idleWaiting: boolean;
+  isTaskContainer: boolean;
+  runningTaskId: string | null;
+  pendingMessages: boolean;
+  pendingTaskCount: number;
+  containerName: string | null;
+  retryCount: number;
+  errorCount: number;
+  lastError: string | null;
+  lastErrorAt: string | null;
 }
 
 export class GroupQueue {
@@ -49,6 +73,9 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        lastError: null,
+        lastErrorAt: null,
+        errorCount: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -210,11 +237,21 @@ export class GroupQueue {
         const success = await this.processMessagesFn(groupJid);
         if (success) {
           state.retryCount = 0;
+          state.errorCount = 0;
+          state.lastError = null;
+          state.lastErrorAt = null;
         } else {
+          state.lastError = "processMessages returned false";
+          state.lastErrorAt = new Date();
+          state.errorCount++;
           this.scheduleRetry(groupJid, state);
         }
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      state.lastError = message;
+      state.lastErrorAt = new Date();
+      state.errorCount++;
       logger.error({ groupJid, err }, "Error processing messages for group");
       this.scheduleRetry(groupJid, state);
     } finally {
@@ -242,7 +279,14 @@ export class GroupQueue {
 
     try {
       await task.fn();
+      state.errorCount = 0;
+      state.lastError = null;
+      state.lastErrorAt = null;
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      state.lastError = message;
+      state.lastErrorAt = new Date();
+      state.errorCount++;
       logger.error({ groupJid, taskId: task.id, err }, "Error running task");
     } finally {
       state.active = false;
@@ -330,6 +374,31 @@ export class GroupQueue {
       }
       // If neither pending, skip this group
     }
+  }
+
+  getSnapshot(): QueueSnapshot {
+    const groups: Record<string, GroupSnapshot> = {};
+    for (const [jid, state] of this.groups) {
+      groups[jid] = {
+        active: state.active,
+        idleWaiting: state.idleWaiting,
+        isTaskContainer: state.isTaskContainer,
+        runningTaskId: state.runningTaskId,
+        pendingMessages: state.pendingMessages,
+        pendingTaskCount: state.pendingTasks.length,
+        containerName: state.containerName,
+        retryCount: state.retryCount,
+        errorCount: state.errorCount,
+        lastError: state.lastError,
+        lastErrorAt: state.lastErrorAt?.toISOString() ?? null,
+      };
+    }
+    return {
+      activeCount: this.activeCount,
+      maxConcurrent: MAX_CONCURRENT_CONTAINERS,
+      waitingCount: this.waitingGroups.length,
+      groups,
+    };
   }
 
   async shutdown(_gracePeriodMs: number): Promise<void> {
