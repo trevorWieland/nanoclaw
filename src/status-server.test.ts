@@ -49,7 +49,6 @@ function createMockDeps(overrides?: Partial<StatusServerDeps>): StatusServerDeps
     getRegisteredGroups: () => ({}),
     getHealthSnapshot: () => new Map<string, HealthStatus>(),
     getRecentEvents: () => [],
-    startedAt: new Date("2026-03-18T12:00:00Z"),
     ...overrides,
   };
 }

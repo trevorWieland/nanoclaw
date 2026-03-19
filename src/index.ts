@@ -719,7 +719,6 @@ async function main(): Promise<void> {
     getRegisteredGroups: () => registeredGroups,
     getHealthSnapshot: () => getHealthSnapshot(),
     getRecentEvents: () => getRecentEvents(),
-    startedAt: new Date(),
   });
 
   // Graceful shutdown handlers

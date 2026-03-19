@@ -12,7 +12,6 @@ export interface StatusServerDeps {
   getRegisteredGroups: () => Record<string, RegisteredGroup>;
   getHealthSnapshot: () => ReadonlyMap<string, HealthStatus>;
   getRecentEvents: () => readonly HealthEvent[];
-  startedAt: Date;
 }
 
 function jsonResponse(res: import("http").ServerResponse, status: number, body: unknown): void {
@@ -124,14 +123,15 @@ async function handleStatus(deps: StatusServerDeps, res: import("http").ServerRe
   try {
     const tasks = await deps.getTasks();
     const mem = process.memoryUsage();
-    const uptimeSeconds = Math.floor((Date.now() - deps.startedAt.getTime()) / 1000);
+    const uptimeSeconds = Math.floor(process.uptime());
+    const startedAt = new Date(Date.now() - uptimeSeconds * 1000);
 
     const body = {
       timestamp: new Date().toISOString(),
       process: {
         pid: process.pid,
         uptime_seconds: uptimeSeconds,
-        started_at: deps.startedAt.toISOString(),
+        started_at: startedAt.toISOString(),
         node_version: process.version,
         memory_mb: Math.round((mem.rss / 1024 / 1024) * 10) / 10,
       },
