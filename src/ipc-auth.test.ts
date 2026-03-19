@@ -7,7 +7,6 @@ import {
   getRegisteredGroup,
   getTaskById,
   setRegisteredGroup,
-  updateTask,
 } from "./db.js";
 import { processTaskIpc, IpcDeps } from "./ipc.js";
 import { RegisteredGroup } from "./types.js";

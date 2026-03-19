@@ -77,14 +77,14 @@ export function shouldSend(groupId: string, message: string): boolean {
   return entry.count < MAX_DUPLICATES;
 }
 
-/**
- * Record that a message was sent (call after actually sending).
- */
 /** @internal - for tests only. */
 export function _resetDedupForTests(): void {
   dedupState.clear();
 }
 
+/**
+ * Record that a message was sent (call after actually sending).
+ */
 export function recordSent(groupId: string, message: string): void {
   const fp = fingerprint(message);
   const now = Date.now();

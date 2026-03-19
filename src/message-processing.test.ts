@@ -43,10 +43,11 @@ describe("decideCursorAction", () => {
     expect(d.shouldPersistTailDrain).toBe(true);
   });
 
-  it("agent error + truncated + no output -> rollback + clear stale marker", () => {
+  it("agent error + truncated + no output -> rollback + clear stale marker + persist", () => {
     const d = decideCursorAction({ ...base, hadError: true, truncated: true });
     expect(d.shouldRollback).toBe(true);
     expect(d.shouldClearTailDrain).toBe(true);
+    expect(d.shouldPersistTailDrain).toBe(true);
   });
 
   it("agent error + isTailDrain + truncated -> rollback without clearing (isTailDrain takes priority)", () => {
@@ -66,6 +67,13 @@ describe("decideCursorAction", () => {
     const d = decideCursorAction({ ...base, hadSendError: true });
     expect(d.shouldRollback).toBe(true);
     expect(d.succeeded).toBe(false);
+  });
+
+  it("send error + truncated + no output -> rollback + clear + persist", () => {
+    const d = decideCursorAction({ ...base, hadSendError: true, truncated: true });
+    expect(d.shouldRollback).toBe(true);
+    expect(d.shouldClearTailDrain).toBe(true);
+    expect(d.shouldPersistTailDrain).toBe(true);
   });
 
   it("send error + output sent -> no rollback", () => {

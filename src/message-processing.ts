@@ -33,22 +33,24 @@ export function decideCursorAction(params: {
       };
     }
     // Error and no output — rollback cursor for retry.
+    const clearTailDrain = truncated && !isTailDrain;
     return {
       shouldRollback: true,
       shouldEnqueue: false,
-      shouldPersistTailDrain: isTailDrain || wasTailDrain,
-      shouldClearTailDrain: truncated && !isTailDrain,
+      shouldPersistTailDrain: isTailDrain || wasTailDrain || clearTailDrain,
+      shouldClearTailDrain: clearTailDrain,
       succeeded: false,
     };
   }
 
   // Agent succeeded but all sends failed — rollback.
   if (hadSendError && !outputSentToUser) {
+    const clearTailDrain = truncated && !isTailDrain;
     return {
       shouldRollback: true,
       shouldEnqueue: false,
-      shouldPersistTailDrain: isTailDrain || wasTailDrain,
-      shouldClearTailDrain: truncated && !isTailDrain,
+      shouldPersistTailDrain: isTailDrain || wasTailDrain || clearTailDrain,
+      shouldClearTailDrain: clearTailDrain,
       succeeded: false,
     };
   }
