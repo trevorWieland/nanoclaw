@@ -7,7 +7,12 @@ import type {
   HealthSource,
   HealthStatus,
 } from "./health-monitor.js";
-import { _resetHealthMonitorForTests, startHealthMonitor } from "./health-monitor.js";
+import {
+  _resetHealthMonitorForTests,
+  getHealthSnapshot,
+  getRecentEvents,
+  startHealthMonitor,
+} from "./health-monitor.js";
 
 vi.mock("./logger.js", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -757,6 +762,78 @@ describe("Health Monitor", () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(deps.sendEmbed).not.toHaveBeenCalled();
+    });
+  });
+
+  // --- Snapshot and event accessors ---
+
+  describe("snapshot and event accessors", () => {
+    it("getHealthSnapshot returns status after poll", async () => {
+      const source = createMockSource("test");
+      const deps = createDeps({ sources: [source] });
+
+      expect(getHealthSnapshot().size).toBe(0);
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const snapshot = getHealthSnapshot();
+      expect(snapshot.size).toBe(1);
+      expect(snapshot.get("test")?.healthy).toBe(true);
+    });
+
+    it("getRecentEvents returns events after delivery", async () => {
+      const state = new Map<string, string>();
+      state.set("health_status_test", "true");
+      state.set("events_cursor_test", '{"offset":0}');
+
+      const source = createMockSource("test", {
+        fetchEvents: vi.fn().mockResolvedValue({
+          events: [
+            {
+              source: "test",
+              type: "phase_completed",
+              timestamp: "2026-03-18T12:00:00Z",
+              title: "Phase completed",
+              data: { phase: "do-task" },
+            },
+          ],
+          cursor: '{"offset":1}',
+        }),
+      });
+
+      const deps = createDeps({
+        sources: [source],
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
+      });
+
+      expect(getRecentEvents().length).toBe(0);
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const events = getRecentEvents();
+      expect(events.length).toBe(1);
+      expect(events[0].source).toBe("test");
+      expect(events[0].type).toBe("phase_completed");
+    });
+
+    it("_resetHealthMonitorForTests clears both caches", async () => {
+      const source = createMockSource("test");
+      const deps = createDeps({ sources: [source] });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(getHealthSnapshot().size).toBe(1);
+
+      _resetHealthMonitorForTests();
+
+      expect(getHealthSnapshot().size).toBe(0);
+      expect(getRecentEvents().length).toBe(0);
     });
   });
 });

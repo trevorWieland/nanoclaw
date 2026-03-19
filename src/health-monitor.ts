@@ -40,6 +40,18 @@ export interface HealthMonitorDeps {
 
 let monitorRunning = false;
 
+const cachedHealthStatus = new Map<string, HealthStatus>();
+const MAX_RECENT_EVENTS = 100;
+const recentEvents: HealthEvent[] = [];
+
+export function getHealthSnapshot(): ReadonlyMap<string, HealthStatus> {
+  return cachedHealthStatus;
+}
+
+export function getRecentEvents(): readonly HealthEvent[] {
+  return recentEvents;
+}
+
 export function startHealthMonitor(deps: HealthMonitorDeps): void {
   if (monitorRunning) {
     logger.debug("Health monitor already running, skipping duplicate start");
@@ -90,6 +102,7 @@ async function pollSource(
   try {
     const status = await source.checkHealth();
     if (status) {
+      cachedHealthStatus.set(source.name, status);
       const previous = lastHealthState.get(source.name) ?? null;
 
       // Only post on state transitions or first-check-unhealthy
@@ -153,7 +166,10 @@ async function pollSource(
             );
           }
         }
-        if (!eventDelivered) {
+        if (eventDelivered) {
+          recentEvents.push(event);
+          if (recentEvents.length > MAX_RECENT_EVENTS) recentEvents.shift();
+        } else {
           allDelivered = false;
         }
       }
@@ -189,4 +205,6 @@ async function sendErrorEmbed(
 /** @internal - for tests only. */
 export function _resetHealthMonitorForTests(): void {
   monitorRunning = false;
+  cachedHealthStatus.clear();
+  recentEvents.length = 0;
 }

@@ -17,6 +17,7 @@ import {
   INSTANCE_ID,
   MAX_PROMPT_MESSAGES,
   POLL_INTERVAL,
+  STATUS_PORT,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from "./config.js";
@@ -72,8 +73,9 @@ import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
 import { loadHealthMonitorConfig } from "./health-monitor-config.js";
-import { startHealthMonitor } from "./health-monitor.js";
+import { getHealthSnapshot, getRecentEvents, startHealthMonitor } from "./health-monitor.js";
 import type { HealthSource } from "./health-monitor.js";
+import { startStatusServer } from "./status-server.js";
 import { TanrenHealthSource } from "./health-sources/tanren.js";
 import { renderEmbedAsText } from "./health-embeds.js";
 import { Channel, NewMessage, PartialSendError, RegisteredGroup } from "./types.js";
@@ -708,10 +710,22 @@ async function main(): Promise<void> {
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
 
+  // Start status server for external dashboards
+  const statusServer = await startStatusServer(STATUS_PORT, PROXY_BIND_HOST, {
+    getQueueSnapshot: () => queue.getSnapshot(),
+    getChannels: () => channels.map((ch) => ({ name: ch.name, connected: ch.isConnected() })),
+    getTasks: () => getAllTasks(),
+    getRegisteredGroups: () => registeredGroups,
+    getHealthSnapshot: () => getHealthSnapshot(),
+    getRecentEvents: () => getRecentEvents(),
+    startedAt: new Date(),
+  });
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
     proxyServer.close();
+    statusServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
