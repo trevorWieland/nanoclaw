@@ -105,24 +105,30 @@ export class PostgresAdapter implements DataStore {
   constructor(private sql: postgres.Sql) {}
 
   async runMigrations(): Promise<void> {
-    await this.sql`
-      CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER NOT NULL
-      )
-    `;
-    const rows = await this.sql<{ version: number }[]>`SELECT version FROM schema_version`;
-    const current = rows.length > 0 ? rows[0].version : 0;
+    // Use advisory lock to prevent concurrent migration runs across processes
+    await this.sql`SELECT pg_advisory_lock(42)`;
+    try {
+      await this.sql`
+        CREATE TABLE IF NOT EXISTS schema_version (
+          id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+          version INTEGER NOT NULL
+        )
+      `;
+      const rows = await this.sql<{ version: number }[]>`SELECT version FROM schema_version`;
+      const current = rows.length > 0 ? rows[0].version : 0;
 
-    for (const migration of MIGRATIONS) {
-      if (migration.version > current) {
-        await migration.up(this.sql);
-        if (current === 0) {
-          await this.sql`INSERT INTO schema_version (version) VALUES (${migration.version})`;
-        } else {
-          await this.sql`UPDATE schema_version SET version = ${migration.version}`;
+      for (const migration of MIGRATIONS) {
+        if (migration.version > current) {
+          await migration.up(this.sql);
+          await this.sql`
+            INSERT INTO schema_version (id, version) VALUES (1, ${migration.version})
+            ON CONFLICT(id) DO UPDATE SET version = EXCLUDED.version
+          `;
+          logger.info({ version: migration.version }, "Postgres migration applied");
         }
-        logger.info({ version: migration.version }, "Postgres migration applied");
       }
+    } finally {
+      await this.sql`SELECT pg_advisory_unlock(42)`;
     }
   }
 

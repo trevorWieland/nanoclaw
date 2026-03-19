@@ -7,7 +7,7 @@
 import fs from "fs";
 import path from "path";
 
-import { initDatabase, setRegisteredGroup } from "../src/db.js";
+import { closeDatabase, initDatabase, setRegisteredGroup } from "../src/db.js";
 import { isValidGroupFolder } from "../src/group-folder.js";
 import { logger } from "../src/logger.js";
 import { emitStatus } from "./status.js";
@@ -95,16 +95,20 @@ export async function run(args: string[]): Promise<void> {
   fs.mkdirSync(path.join(projectRoot, "data"), { recursive: true });
 
   // Initialize DataStore and register the group
-  await initDatabase();
-  await setRegisteredGroup(parsed.jid, {
-    name: parsed.name,
-    folder: parsed.folder,
-    trigger: parsed.trigger,
-    added_at: new Date().toISOString(),
-    requiresTrigger: parsed.requiresTrigger,
-    isMain: parsed.isMain,
-  });
-  logger.info("Wrote registration to DataStore");
+  try {
+    await initDatabase();
+    await setRegisteredGroup(parsed.jid, {
+      name: parsed.name,
+      folder: parsed.folder,
+      trigger: parsed.trigger,
+      added_at: new Date().toISOString(),
+      requiresTrigger: parsed.requiresTrigger,
+      isMain: parsed.isMain,
+    });
+    logger.info("Wrote registration to DataStore");
+  } finally {
+    await closeDatabase();
+  }
 
   // Create group folders
   fs.mkdirSync(path.join(projectRoot, "groups", parsed.folder, "logs"), {

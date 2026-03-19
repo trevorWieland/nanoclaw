@@ -5,7 +5,7 @@
 import fs from "fs";
 import path from "path";
 
-import { getRegisteredGroupCount, initDatabase } from "../src/db.js";
+import { closeDatabase, getRegisteredGroupCount, initDatabase } from "../src/db.js";
 import { logger } from "../src/logger.js";
 import { commandExists, getPlatform, isHeadless, isWSL } from "./platform.js";
 import { emitStatus } from "./status.js";
@@ -55,6 +55,8 @@ export async function run(_args: string[]): Promise<void> {
       if (count > 0) hasRegisteredGroups = true;
     } catch {
       // Table might not exist yet
+    } finally {
+      await closeDatabase();
     }
   }
 

@@ -9,7 +9,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 
-import { getRegisteredGroupCount, initDatabase } from "../src/db.js";
+import { closeDatabase, getRegisteredGroupCount, initDatabase } from "../src/db.js";
 import { readEnvFile } from "../src/env.js";
 import { logger } from "../src/logger.js";
 import { getServiceManager, isRoot } from "./platform.js";
@@ -138,6 +138,8 @@ export async function run(_args: string[]): Promise<void> {
     registeredGroups = await getRegisteredGroupCount();
   } catch {
     // Table might not exist
+  } finally {
+    await closeDatabase();
   }
 
   // 6. Check mount allowlist

@@ -40,7 +40,7 @@ export interface HealthMonitorDeps {
 
 let monitorRunning = false;
 
-export async function startHealthMonitor(deps: HealthMonitorDeps): Promise<void> {
+export function startHealthMonitor(deps: HealthMonitorDeps): void {
   if (monitorRunning) {
     logger.debug("Health monitor already running, skipping duplicate start");
     return;
@@ -49,13 +49,15 @@ export async function startHealthMonitor(deps: HealthMonitorDeps): Promise<void>
 
   const lastHealthState = new Map<string, boolean>();
 
-  // Initialize from persisted state
-  for (const source of deps.sources) {
-    const persisted = await deps.getState(`health_status_${source.name}`);
-    if (persisted !== undefined) {
-      lastHealthState.set(source.name, persisted === "true");
+  const init = async () => {
+    // Initialize from persisted state
+    for (const source of deps.sources) {
+      const persisted = await deps.getState(`health_status_${source.name}`);
+      if (persisted !== undefined) {
+        lastHealthState.set(source.name, persisted === "true");
+      }
     }
-  }
+  };
 
   const poll = async () => {
     for (const source of deps.sources) {
@@ -67,7 +69,16 @@ export async function startHealthMonitor(deps: HealthMonitorDeps): Promise<void>
     }
   };
 
-  setTimeout(poll, 0);
+  // Init then start polling — errors are caught to prevent unhandled rejections
+  init()
+    .then(() => setTimeout(poll, 0))
+    .catch((err) => {
+      logger.error(
+        { err },
+        "Health monitor: failed to initialize persisted state, starting with empty state",
+      );
+      setTimeout(poll, 0);
+    });
 }
 
 async function pollSource(

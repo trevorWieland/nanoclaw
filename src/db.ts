@@ -15,6 +15,11 @@ export async function initDatabase(): Promise<void> {
   });
 }
 
+/** Close the DataStore connection. Used by setup CLI scripts for clean exit. */
+export async function closeDatabase(): Promise<void> {
+  if (store) await store.close();
+}
+
 /** @internal - for tests only. Creates a fresh in-memory database. */
 export async function _initTestDatabase(): Promise<void> {
   store = await createTestDataStore(ASSISTANT_NAME);

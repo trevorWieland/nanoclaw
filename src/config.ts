@@ -93,10 +93,14 @@ export const TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(ASSISTANT_NAME)}\\b`,
 // Uses system timezone by default
 export const TIMEZONE = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export const DB_BACKEND = (process.env.DB_BACKEND || envConfig.DB_BACKEND || "sqlite") as
-  | "sqlite"
-  | "postgres";
+const rawDbBackend = process.env.DB_BACKEND || envConfig.DB_BACKEND || "sqlite";
+if (rawDbBackend !== "sqlite" && rawDbBackend !== "postgres") {
+  throw new Error(`Invalid DB_BACKEND="${rawDbBackend}" — must be "sqlite" or "postgres"`);
+}
+export const DB_BACKEND: "sqlite" | "postgres" = rawDbBackend;
+
+const rawDatabaseUrl = process.env.DATABASE_URL || envConfig.DATABASE_URL || "";
 export const DATABASE_URL =
-  process.env.DATABASE_URL || envConfig.DATABASE_URL || path.join(STORE_DIR, "messages.db");
+  rawDatabaseUrl || (DB_BACKEND === "sqlite" ? path.join(STORE_DIR, "messages.db") : "");
 
 export const TANREN_API_URL = process.env.TANREN_API_URL || "";

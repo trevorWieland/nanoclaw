@@ -264,7 +264,10 @@ export class GroupQueue {
         "Max retries exceeded, dropping messages (will retry on next incoming message)",
       );
       state.retryCount = 0;
-      this.onRetriesExhausted?.(groupJid);
+      // Handler may be async (e.g. persisting state) — catch to prevent unhandled rejections
+      Promise.resolve(this.onRetriesExhausted?.(groupJid))?.catch((err) =>
+        logger.error({ groupJid, err }, "onRetriesExhausted handler failed"),
+      );
       return;
     }
 

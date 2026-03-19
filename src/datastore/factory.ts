@@ -8,6 +8,13 @@ export interface DataStoreConfig {
 
 export async function createDataStore(config: DataStoreConfig): Promise<DataStore> {
   if (config.backend === "postgres") {
+    if (!config.url || !config.url.startsWith("postgres")) {
+      const got = config.url || "(empty)";
+      throw new Error(
+        `DB_BACKEND=postgres requires DATABASE_URL to be a Postgres connection string (got "${got}"). ` +
+          "Set DATABASE_URL=postgres://user:pass@host:5432/dbname in .env",
+      );
+    }
     const pgMod = await import("postgres");
     const postgres = pgMod.default;
     const { PostgresAdapter } = await import("./postgres-adapter.js");

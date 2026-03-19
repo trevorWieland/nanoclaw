@@ -4,8 +4,8 @@ export interface ChatInfo {
   jid: string;
   name: string;
   last_message_time: string;
-  channel: string;
-  is_group: number;
+  channel: string | null;
+  is_group: number | null;
 }
 
 export interface DataStore {
