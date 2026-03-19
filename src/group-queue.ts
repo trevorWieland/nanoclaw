@@ -279,6 +279,9 @@ export class GroupQueue {
 
     try {
       await task.fn();
+      state.errorCount = 0;
+      state.lastError = null;
+      state.lastErrorAt = null;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       state.lastError = message;

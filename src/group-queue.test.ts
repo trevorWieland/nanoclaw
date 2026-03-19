@@ -594,6 +594,61 @@ describe("GroupQueue", () => {
     expect(callCount).toBe(3);
   });
 
+  // --- Error tracking in snapshots ---
+
+  it("successful task clears error fields from prior failure", async () => {
+    let callCount = 0;
+
+    const taskFn = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) throw new Error("transient failure");
+    });
+
+    // Run task that fails
+    queue.enqueueTask("group1@g.us", "task-1", taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    let snapshot = queue.getSnapshot();
+    expect(snapshot.groups["group1@g.us"].errorCount).toBe(1);
+    expect(snapshot.groups["group1@g.us"].lastError).toBe("transient failure");
+
+    // Run task that succeeds — error fields should clear
+    queue.enqueueTask("group1@g.us", "task-2", taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    snapshot = queue.getSnapshot();
+    expect(snapshot.groups["group1@g.us"].errorCount).toBe(0);
+    expect(snapshot.groups["group1@g.us"].lastError).toBeNull();
+    expect(snapshot.groups["group1@g.us"].lastErrorAt).toBeNull();
+  });
+
+  it("successful message processing clears error fields from prior failure", async () => {
+    let callCount = 0;
+
+    const processMessages = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) return false; // failure
+      return true; // success
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // First call fails
+    queue.enqueueMessageCheck("group1@g.us");
+    await vi.advanceTimersByTimeAsync(10);
+
+    let snapshot = queue.getSnapshot();
+    expect(snapshot.groups["group1@g.us"].errorCount).toBe(1);
+    expect(snapshot.groups["group1@g.us"].lastError).toBe("processMessages returned false");
+
+    // Retry succeeds after backoff
+    await vi.advanceTimersByTimeAsync(5100);
+
+    snapshot = queue.getSnapshot();
+    expect(snapshot.groups["group1@g.us"].errorCount).toBe(0);
+    expect(snapshot.groups["group1@g.us"].lastError).toBeNull();
+  });
+
   it("preempts when idle arrives with pending tasks", async () => {
     const fs = await import("fs");
     let resolveProcess: () => void;
