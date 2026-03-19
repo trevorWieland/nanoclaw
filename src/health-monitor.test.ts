@@ -782,6 +782,24 @@ describe("Health Monitor", () => {
       expect(snapshot.get("test")?.healthy).toBe(true);
     });
 
+    it("getHealthSnapshot reflects unhealthy when checkHealth throws", async () => {
+      const source = createMockSource("test");
+      const deps = createDeps({ sources: [source] });
+
+      // First poll: healthy
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getHealthSnapshot().get("test")?.healthy).toBe(true);
+
+      // Second poll: checkHealth throws
+      vi.mocked(source.checkHealth).mockRejectedValue(new Error("connection refused"));
+      await vi.advanceTimersByTimeAsync(300000);
+
+      const snapshot = getHealthSnapshot().get("test")!;
+      expect(snapshot.healthy).toBe(false);
+      expect(snapshot.message).toBe("connection refused");
+    });
+
     it("getRecentEvents returns events after delivery", async () => {
       const state = new Map<string, string>();
       state.set("health_status_test", "true");

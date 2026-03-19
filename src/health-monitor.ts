@@ -134,6 +134,12 @@ async function pollSource(
     }
   } catch (err) {
     logger.error({ source: source.name, err }, "Health monitor: checkHealth threw");
+    cachedHealthStatus.set(source.name, {
+      source: source.name,
+      healthy: false,
+      message: err instanceof Error ? err.message : String(err),
+      checkedAt: new Date(),
+    });
     await sendErrorEmbed(deps, source.name, "Health check error", err);
   }
 
