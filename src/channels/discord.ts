@@ -338,6 +338,8 @@ export class DiscordChannel implements Channel {
 
       if (toDelete.size === 0) break;
 
+      let deletedThisIteration = 0;
+
       // Split into bulk-deletable (<14 days) and old (>14 days)
       const bulkable = toDelete.filter((m) => m.createdTimestamp > twoWeeksAgo);
       const old = toDelete.filter((m) => m.createdTimestamp <= twoWeeksAgo);
@@ -346,6 +348,7 @@ export class DiscordChannel implements Channel {
         try {
           const deleted = await textChannel.bulkDelete(bulkable, true);
           totalDeleted += deleted.size;
+          deletedThisIteration += deleted.size;
         } catch (err) {
           logger.error({ jid, err }, "Bulk delete failed");
         }
@@ -356,6 +359,7 @@ export class DiscordChannel implements Channel {
         try {
           await msg.delete();
           totalDeleted++;
+          deletedThisIteration++;
           // Rate limit: 1 delete per 500ms to avoid 429s
           await new Promise((r) => setTimeout(r, 500));
         } catch (err) {
@@ -363,7 +367,15 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      remaining -= toDelete.size;
+      if (deletedThisIteration === 0) {
+        logger.warn(
+          { jid, skipped: toDelete.size },
+          "Purge made no progress — breaking to avoid infinite loop",
+        );
+        break;
+      }
+
+      remaining -= deletedThisIteration;
       if (messages.size < fetchLimit) break; // No more messages
       if (options?.since && old.size === 0 && bulkable.size === 0) break;
     }
