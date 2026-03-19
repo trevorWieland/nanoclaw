@@ -80,6 +80,11 @@ export function shouldSend(groupId: string, message: string): boolean {
 /**
  * Record that a message was sent (call after actually sending).
  */
+/** @internal - for tests only. */
+export function _resetDedupForTests(): void {
+  dedupState.clear();
+}
+
 export function recordSent(groupId: string, message: string): void {
   const fp = fingerprint(message);
   const now = Date.now();

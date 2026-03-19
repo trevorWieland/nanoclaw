@@ -23,6 +23,12 @@ const logger = pino({
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
 
+/** @internal - for tests only. */
+export function _resetMountSecurityForTests(): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+}
+
 /**
  * Default blocked patterns - paths that should never be mounted
  */
