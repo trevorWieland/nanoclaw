@@ -1157,4 +1157,233 @@ describe("DiscordChannel", () => {
       expect(channel.name).toBe("discord");
     });
   });
+
+  // --- Purge messages ---
+
+  describe("purgeMessages", () => {
+    /** Map subclass with filter() returning a MockCollection (mirrors discord.js Collection). */
+    class MockCollection<K, V> extends Map<K, V> {
+      filter(fn: (value: V, key: K) => boolean): MockCollection<K, V> {
+        const result = new MockCollection<K, V>();
+        for (const [k, v] of this) {
+          if (fn(v, k)) result.set(k, v);
+        }
+        return result;
+      }
+    }
+
+    function createPurgeMessage(id: string, opts: { createdAt?: Date; deletable?: boolean } = {}) {
+      const createdAt = opts.createdAt ?? new Date();
+      return {
+        id,
+        createdAt,
+        createdTimestamp: createdAt.getTime(),
+        delete:
+          opts.deletable === false
+            ? vi.fn().mockRejectedValue(new Error("Cannot delete"))
+            : vi.fn().mockResolvedValue(undefined),
+      };
+    }
+
+    function makePurgeChannel(
+      batches: MockCollection<string, any>[],
+      bulkDeleteResult?: MockCollection<string, any> | Error,
+    ) {
+      let fetchCall = 0;
+      return {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+        messages: {
+          fetch: vi.fn().mockImplementation(() => {
+            const batch = batches[fetchCall] ?? new MockCollection();
+            fetchCall++;
+            return Promise.resolve(batch);
+          }),
+        },
+        bulkDelete:
+          bulkDeleteResult instanceof Error
+            ? vi.fn().mockRejectedValue(bulkDeleteResult)
+            : vi.fn().mockImplementation((msgs: MockCollection<string, any>) => {
+                // Return the same collection by default (all deleted), or override
+                return Promise.resolve(bulkDeleteResult ?? msgs);
+              }),
+      };
+    }
+
+    it("returns 0 when client not initialized", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      // Don't call connect — client is null
+
+      const result = await channel.purgeMessages("dc:123");
+      expect(result).toBe(0);
+    });
+
+    it("returns 0 for non-text channel", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      // Default mock channel has no `messages` property
+      const mockChannel = {
+        send: vi.fn(),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const result = await channel.purgeMessages("dc:123");
+      expect(result).toBe(0);
+    });
+
+    it("bulk-deletes recent messages", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const batch = new MockCollection<string, any>();
+      batch.set("m1", createPurgeMessage("m1"));
+      batch.set("m2", createPurgeMessage("m2"));
+      batch.set("m3", createPurgeMessage("m3"));
+
+      const mockChannel = makePurgeChannel([batch]);
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const result = await channel.purgeMessages("dc:123");
+      expect(result).toBe(3);
+      expect(mockChannel.bulkDelete).toHaveBeenCalled();
+    });
+
+    it("breaks loop when all deletes fail (zero progress)", async () => {
+      const { logger } = await import("../logger.js");
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      // Messages that will fail bulk delete
+      const batch = new MockCollection<string, any>();
+      batch.set("m1", createPurgeMessage("m1"));
+      batch.set("m2", createPurgeMessage("m2"));
+
+      // bulkDelete returns empty collection (nothing actually deleted)
+      const emptyResult = new MockCollection<string, any>();
+      const mockChannel = makePurgeChannel([batch], emptyResult);
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const result = await channel.purgeMessages("dc:123");
+      expect(result).toBe(0);
+      expect(mockChannel.messages.fetch).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ skipped: 2 }),
+        expect.stringContaining("no progress"),
+      );
+    });
+
+    it("deletes what it can with mixed deletable/undeletable (old messages)", async () => {
+      vi.useFakeTimers();
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const oldDate = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+      const batch = new MockCollection<string, any>();
+      batch.set("m1", createPurgeMessage("m1", { createdAt: oldDate, deletable: true }));
+      batch.set("m2", createPurgeMessage("m2", { createdAt: oldDate, deletable: false }));
+      batch.set("m3", createPurgeMessage("m3", { createdAt: oldDate, deletable: true }));
+
+      const mockChannel = makePurgeChannel([batch]);
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const purgePromise = channel.purgeMessages("dc:123");
+      await vi.runAllTimersAsync();
+      const result = await purgePromise;
+
+      expect(result).toBe(2);
+    });
+
+    it("breaks when bulk delete throws and no old messages exist", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const batch = new MockCollection<string, any>();
+      batch.set("m1", createPurgeMessage("m1"));
+      batch.set("m2", createPurgeMessage("m2"));
+
+      const mockChannel = makePurgeChannel([batch], new Error("Missing Permissions"));
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const result = await channel.purgeMessages("dc:123");
+      expect(result).toBe(0);
+      // Should not spin — zero-progress check breaks the loop
+      expect(mockChannel.messages.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("count option tracks actual deletions across batches", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      // count=4, batch of 4 messages where bulkDelete only deletes 2 (partial success),
+      // then second batch of 2 messages fully deleted → total 4
+      const batch1 = new MockCollection<string, any>();
+      for (let i = 1; i <= 4; i++) batch1.set(`m${i}`, createPurgeMessage(`m${i}`));
+
+      const batch2 = new MockCollection<string, any>();
+      batch2.set("m5", createPurgeMessage("m5"));
+      batch2.set("m6", createPurgeMessage("m6"));
+
+      let fetchCall = 0;
+      const partialResult = new MockCollection<string, any>();
+      partialResult.set("m1", batch1.get("m1")!);
+      partialResult.set("m2", batch1.get("m2")!);
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+        messages: {
+          fetch: vi.fn().mockImplementation(() => {
+            const batch = [batch1, batch2][fetchCall] ?? new MockCollection();
+            fetchCall++;
+            return Promise.resolve(batch);
+          }),
+        },
+        // First call: partial result (2 of 4 deleted). Second call: full result.
+        bulkDelete: vi
+          .fn()
+          .mockResolvedValueOnce(partialResult)
+          .mockImplementation((msgs: MockCollection<string, any>) => Promise.resolve(msgs)),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const result = await channel.purgeMessages("dc:123", { count: 4 });
+      expect(result).toBe(4);
+      expect(mockChannel.messages.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("individually deletes old messages with rate limiting", async () => {
+      vi.useFakeTimers();
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const oldDate = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+      const msg1 = createPurgeMessage("m1", { createdAt: oldDate });
+      const msg2 = createPurgeMessage("m2", { createdAt: oldDate });
+
+      const batch = new MockCollection<string, any>();
+      batch.set("m1", msg1);
+      batch.set("m2", msg2);
+
+      const mockChannel = makePurgeChannel([batch]);
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const purgePromise = channel.purgeMessages("dc:123");
+      await vi.runAllTimersAsync();
+      const result = await purgePromise;
+
+      expect(result).toBe(2);
+      expect(msg1.delete).toHaveBeenCalled();
+      expect(msg2.delete).toHaveBeenCalled();
+    });
+  });
 });
