@@ -12,6 +12,7 @@ on:
       - "tsconfig.json"
       - "CLAUDE.md"
       - "docs/**"
+      - ".dockerignore"
 
 permissions:
   contents: write
@@ -25,6 +26,7 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
       sha: ${{ steps.bump.outputs.sha }}
+      sha_short: ${{ steps.bump.outputs.sha_short }}
     steps:
       - uses: actions/create-github-app-token@v1
         id: app-token
@@ -50,15 +52,17 @@ jobs:
 
           git add package.json pnpm-lock.yaml
           if git diff --cached --quiet; then
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            SHA="${{ github.sha }}"
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git commit -m "chore: bump version to $VERSION"
             git pull --rebase
             git push https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref_name }}
-            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            SHA="$(git rev-parse HEAD)"
           fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${SHA:0:7}" >> "$GITHUB_OUTPUT"
 
   publish-host:
     needs: version
@@ -86,7 +90,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ needs.version.outputs.version }}
-            type=sha
+            type=raw,value=sha-${{ needs.version.outputs.sha_short }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -123,7 +127,7 @@ jobs:
           tags: |
             type=raw,value=latest
             type=raw,value=${{ needs.version.outputs.version }}
-            type=sha
+            type=raw,value=sha-${{ needs.version.outputs.sha_short }}
 
       - uses: docker/build-push-action@v6
         with:
