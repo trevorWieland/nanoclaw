@@ -82,8 +82,7 @@ export function startStatusServer(
         return;
       }
 
-      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-      const pathname = url.pathname;
+      const pathname = (req.url || "/").split("?")[0];
 
       if (pathname === "/healthz") {
         jsonResponse(res, 200, { ok: true });

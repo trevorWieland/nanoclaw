@@ -262,6 +262,26 @@ describe("status-server", () => {
     expect(JSON.parse(res.body)).toEqual({ error: "Not found" });
   });
 
+  it("handles malformed Host header without crashing", async () => {
+    const port = await start();
+    const res = await makeRequest(port, {
+      method: "GET",
+      path: "/healthz",
+      headers: { host: "bad host with spaces" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+  });
+
+  it("handles path with query string", async () => {
+    const port = await start();
+    const res = await makeRequest(port, { method: "GET", path: "/healthz?foo=bar" });
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ ok: true });
+  });
+
   it("POST returns 405", async () => {
     const port = await start();
     const res = await makeRequest(port, { method: "POST", path: "/healthz" });
