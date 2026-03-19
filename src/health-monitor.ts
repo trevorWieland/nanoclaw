@@ -151,6 +151,7 @@ async function pollSource(
       }
     } else {
       let allDelivered = true;
+      const deliveredEvents: HealthEvent[] = [];
       for (const event of events) {
         const embed = formatEventEmbed(event);
         const jids = resolveJids(deps.config, event.type, source.name);
@@ -167,16 +168,20 @@ async function pollSource(
           }
         }
         if (eventDelivered) {
-          recentEvents.push(event);
-          if (recentEvents.length > MAX_RECENT_EVENTS) recentEvents.shift();
+          deliveredEvents.push(event);
         } else {
           allDelivered = false;
         }
       }
-      // Only advance cursor after successful delivery.
-      // If any event failed all sends, keep old cursor to retry next poll.
+      // Only advance cursor and cache events after all deliveries succeed.
+      // If any event failed all sends, keep old cursor to retry next poll —
+      // caching before commit would produce duplicates on the retry.
       if (allDelivered && newCursor !== null) {
         await deps.setState(cursorKey, newCursor);
+        for (const event of deliveredEvents) {
+          recentEvents.push(event);
+          if (recentEvents.length > MAX_RECENT_EVENTS) recentEvents.shift();
+        }
       }
     }
   } catch (err) {

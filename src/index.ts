@@ -17,6 +17,7 @@ import {
   INSTANCE_ID,
   MAX_PROMPT_MESSAGES,
   POLL_INTERVAL,
+  STATUS_BIND_HOST,
   STATUS_PORT,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -711,7 +712,7 @@ async function main(): Promise<void> {
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
 
   // Start status server for external dashboards
-  const statusServer = await startStatusServer(STATUS_PORT, PROXY_BIND_HOST, {
+  const statusServer = await startStatusServer(STATUS_PORT, STATUS_BIND_HOST, {
     getQueueSnapshot: () => queue.getSnapshot(),
     getChannels: () => channels.map((ch) => ({ name: ch.name, connected: ch.isConnected() })),
     getTasks: () => getAllTasks(),

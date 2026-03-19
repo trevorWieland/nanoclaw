@@ -821,6 +821,59 @@ describe("Health Monitor", () => {
       expect(events[0].type).toBe("phase_completed");
     });
 
+    it("does not cache events when batch has partial delivery failure", async () => {
+      const state = new Map<string, string>();
+      state.set("health_status_test", "true");
+      state.set("events_cursor_test", '{"offset":0}');
+
+      const source = createMockSource("test", {
+        fetchEvents: vi.fn().mockResolvedValue({
+          events: [
+            {
+              source: "test",
+              type: "phase_completed",
+              timestamp: "2026-03-18T12:00:00Z",
+              title: "Event 1",
+              data: {},
+            },
+            {
+              source: "test",
+              type: "error_occurred",
+              timestamp: "2026-03-18T12:01:00Z",
+              title: "Event 2",
+              data: {},
+            },
+          ],
+          cursor: '{"offset":2}',
+        }),
+      });
+
+      // First event succeeds, second fails all sends
+      let sendCount = 0;
+      const sendEmbed = vi.fn(async () => {
+        sendCount++;
+        // Calls: 1 = health status embed (no-op, healthy→healthy), 2 = event 1, 3 = event 2
+        if (sendCount === 2) return; // event 1 succeeds
+        throw new Error("Discord down"); // event 2 fails
+      });
+
+      const deps = createDeps({
+        sources: [source],
+        sendEmbed,
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
+      });
+
+      startHealthMonitor(deps);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // No events should be cached — batch had partial failure, cursor not advanced
+      expect(getRecentEvents().length).toBe(0);
+      expect(state.get("events_cursor_test")).toBe('{"offset":0}');
+    });
+
     it("_resetHealthMonitorForTests clears both caches", async () => {
       const source = createMockSource("test");
       const deps = createDeps({ sources: [source] });
