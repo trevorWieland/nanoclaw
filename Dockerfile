@@ -2,7 +2,7 @@
 # Orchestrator that spawns sibling agent containers via Docker socket.
 # Uses Docker-out-of-Docker: needs /var/run/docker.sock mounted at runtime.
 
-FROM node:22-slim AS build
+FROM node:24-slim AS build
 
 # better-sqlite3 requires native compilation
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -27,7 +27,7 @@ RUN pnpm run build
 RUN pnpm prune --prod
 
 # --- Production stage ---
-FROM node:22-slim
+FROM node:24-slim
 
 # Docker CLI for Docker-out-of-Docker (just the CLI, not the daemon)
 RUN apt-get update \
