@@ -186,8 +186,8 @@ import { PartialSendError } from "../types.js";
 
 function createTestOpts(overrides?: Partial<DiscordChannelOpts>): DiscordChannelOpts {
   return {
-    onMessage: vi.fn(),
-    onChatMetadata: vi.fn(),
+    onMessage: vi.fn().mockResolvedValue(undefined),
+    onChatMetadata: vi.fn().mockResolvedValue(undefined),
     registeredGroups: vi.fn(() => ({
       "dc:1234567890123456": {
         name: "Test Server #general",

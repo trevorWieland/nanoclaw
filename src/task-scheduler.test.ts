@@ -8,8 +8,8 @@ import {
 } from "./task-scheduler.js";
 
 describe("task scheduler", () => {
-  beforeEach(() => {
-    _initTestDatabase();
+  beforeEach(async () => {
+    await _initTestDatabase();
     _resetSchedulerLoopForTests();
     vi.useFakeTimers();
   });
@@ -19,7 +19,7 @@ describe("task scheduler", () => {
   });
 
   it("pauses due tasks with invalid group folders to prevent retry churn", async () => {
-    createTask({
+    await createTask({
       id: "task-invalid-folder",
       group_folder: "../../outside",
       chat_jid: "bad@g.us",
@@ -46,7 +46,7 @@ describe("task scheduler", () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    const task = getTaskById("task-invalid-folder");
+    const task = await getTaskById("task-invalid-folder");
     expect(task?.status).toBe("paused");
   });
 

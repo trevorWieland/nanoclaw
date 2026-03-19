@@ -92,9 +92,9 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 const pendingTailDrain = new Map<string, { ts: string; id: string }>();
 
-function loadState(): void {
-  lastTimestamp = getRouterState("last_timestamp") || "";
-  const agentTs = getRouterState("last_agent_timestamp");
+async function loadState(): Promise<void> {
+  lastTimestamp = (await getRouterState("last_timestamp")) || "";
+  const agentTs = await getRouterState("last_agent_timestamp");
   try {
     const raw: Record<string, string | { ts: string; id: string }> = agentTs
       ? JSON.parse(agentTs)
@@ -107,7 +107,7 @@ function loadState(): void {
     logger.warn("Corrupted last_agent_timestamp in DB, resetting");
     lastAgentTimestamp = {};
   }
-  const tailDrainRaw = getRouterState("pending_tail_drain");
+  const tailDrainRaw = await getRouterState("pending_tail_drain");
   try {
     const parsed = tailDrainRaw ? JSON.parse(tailDrainRaw) : {};
     pendingTailDrain.clear();
@@ -123,21 +123,21 @@ function loadState(): void {
     logger.warn("Corrupted pending_tail_drain in DB, resetting");
     pendingTailDrain.clear();
   }
-  sessions = getAllSessions();
-  registeredGroups = getAllRegisteredGroups();
+  sessions = await getAllSessions();
+  registeredGroups = await getAllRegisteredGroups();
   logger.info({ groupCount: Object.keys(registeredGroups).length }, "State loaded");
 }
 
-function saveState(): void {
-  setRouterState("last_timestamp", lastTimestamp);
-  setRouterState("last_agent_timestamp", JSON.stringify(lastAgentTimestamp));
+async function saveState(): Promise<void> {
+  await setRouterState("last_timestamp", lastTimestamp);
+  await setRouterState("last_agent_timestamp", JSON.stringify(lastAgentTimestamp));
 }
 
-function savePendingTailDrain(): void {
-  setRouterState("pending_tail_drain", JSON.stringify(Object.fromEntries(pendingTailDrain)));
+async function savePendingTailDrain(): Promise<void> {
+  await setRouterState("pending_tail_drain", JSON.stringify(Object.fromEntries(pendingTailDrain)));
 }
 
-function registerGroup(jid: string, group: RegisteredGroup): void {
+async function registerGroup(jid: string, group: RegisteredGroup): Promise<void> {
   let groupDir: string;
   try {
     groupDir = resolveGroupFolderPath(group.folder);
@@ -150,7 +150,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   }
 
   registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  await setRegisteredGroup(jid, group);
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, "logs"), { recursive: true });
@@ -162,8 +162,10 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import("./container-runner.js").AvailableGroup[] {
-  const chats = getAllChats();
+export async function getAvailableGroups(): Promise<
+  import("./container-runner.js").AvailableGroup[]
+> {
+  const chats = await getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
   return chats
@@ -208,16 +210,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // The bounded path doesn't touch pendingTailDrain, and the poll guard
   // would block the group indefinitely if the entry persists.
   if (!needsFullDrain && pendingTailDrain.delete(chatJid)) {
-    savePendingTailDrain();
+    await savePendingTailDrain();
   }
 
   const cursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
   let missedMessages = needsFullDrain
-    ? getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id)
-    : getMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, MAX_PROMPT_MESSAGES, cursor.id);
+    ? await getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id)
+    : await getMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, MAX_PROMPT_MESSAGES, cursor.id);
 
   if (missedMessages.length === 0) {
-    if (pendingTailDrain.delete(chatJid)) savePendingTailDrain();
+    if (pendingTailDrain.delete(chatJid)) await savePendingTailDrain();
     return true;
   }
 
@@ -276,7 +278,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
       );
       if (triggerIdx < 0) {
-        if (wasTailDrain) savePendingTailDrain();
+        if (wasTailDrain) await savePendingTailDrain();
         return true;
       }
       const total = missedMessages.length;
@@ -299,9 +301,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (truncated) {
     const cutoff = isTailDrain && tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!;
     pendingTailDrain.set(chatJid, cutoff);
-    savePendingTailDrain();
+    await savePendingTailDrain();
   }
-  saveState();
+  await saveState();
 
   logger.info({ group: group.name, messageCount: missedMessages.length }, "Processing messages");
 
@@ -386,25 +388,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         // Marker already persisted at cursor-advance time.
         queue.enqueueMessageCheck(chatJid);
       } else if (isTailDrain) {
-        savePendingTailDrain();
+        await savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
       } else if (wasTailDrain) {
-        savePendingTailDrain();
+        await savePendingTailDrain();
       }
       return true;
     }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    await saveState();
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
-      savePendingTailDrain();
+      await savePendingTailDrain();
     } else if (truncated) {
       // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
       pendingTailDrain.delete(chatJid);
-      savePendingTailDrain();
+      await savePendingTailDrain();
     } else if (wasTailDrain) {
-      savePendingTailDrain();
+      await savePendingTailDrain();
     }
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
     return false;
@@ -414,16 +416,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Only roll back if no output reached the user (avoid duplicate sends).
   if (hadSendError && !outputSentToUser) {
     lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    await saveState();
     if (isTailDrain) {
       pendingTailDrain.set(chatJid, tailDrainCutoff?.ts ? tailDrainCutoff : fullBacklogLast!);
-      savePendingTailDrain();
+      await savePendingTailDrain();
     } else if (truncated) {
       // Pre-persisted marker is stale after rollback — clear it to preserve trigger gating
       pendingTailDrain.delete(chatJid);
-      savePendingTailDrain();
+      await savePendingTailDrain();
     } else if (wasTailDrain) {
-      savePendingTailDrain();
+      await savePendingTailDrain();
     }
     logger.warn({ group: group.name }, "All channel sends failed, rolled back cursor for retry");
     return false;
@@ -433,10 +435,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Marker already persisted at cursor-advance time; just enqueue continuation.
     queue.enqueueMessageCheck(chatJid);
   } else if (isTailDrain) {
-    savePendingTailDrain();
+    await savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
   } else if (wasTailDrain) {
-    savePendingTailDrain();
+    await savePendingTailDrain();
   }
   return true;
 }
@@ -451,7 +453,7 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
+  const tasks = await getAllTasks();
   writeTasksSnapshot(
     group.folder,
     isMain,
@@ -467,7 +469,7 @@ async function runAgent(
   );
 
   // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
+  const availableGroups = await getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
     isMain,
@@ -480,7 +482,7 @@ async function runAgent(
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          await setSession(group.folder, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -506,7 +508,7 @@ async function runAgent(
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      await setSession(group.folder, output.newSessionId);
     }
 
     if (output.status === "error") {
@@ -533,14 +535,14 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const { messages, newTimestamp } = await getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, "New messages");
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
-        saveState();
+        await saveState();
 
         // Deduplicate by group
         const messagesByGroup = new Map<string, NewMessage[]>();
@@ -590,7 +592,7 @@ async function startMessageLoop(): Promise<void> {
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const pipeCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
-          const allPending = getMessagesSince(
+          const allPending = await getMessagesSince(
             chatJid,
             pipeCursor.ts,
             ASSISTANT_NAME,
@@ -607,7 +609,7 @@ async function startMessageLoop(): Promise<void> {
             );
             const pipeLast = messagesToSend[messagesToSend.length - 1];
             lastAgentTimestamp[chatJid] = { ts: pipeLast.timestamp, id: pipeLast.id };
-            saveState();
+            await saveState();
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
@@ -629,7 +631,7 @@ async function startMessageLoop(): Promise<void> {
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
  */
-function recoverPendingMessages(): void {
+async function recoverPendingMessages(): Promise<void> {
   // Phase 1: Enqueue groups with pending tail-drain entries from the DB.
   // After a crash, the entry may survive even though no messages remain
   // at the cutoff — processGroupMessages will clear it (line 205).
@@ -648,7 +650,7 @@ function recoverPendingMessages(): void {
       removedStale = true;
     }
   }
-  if (removedStale) savePendingTailDrain();
+  if (removedStale) await savePendingTailDrain();
 
   // Phase 2: Enqueue groups with unprocessed messages at the cursor.
   // Skip groups already enqueued in Phase 1 — a second enqueue while
@@ -657,7 +659,7 @@ function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     if (phase1Enqueued.has(chatJid)) continue;
     const recoverCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
-    const pending = getMessagesSince(
+    const pending = await getMessagesSince(
       chatJid,
       recoverCursor.ts,
       ASSISTANT_NAME,
@@ -678,9 +680,9 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
-  initDatabase();
+  await initDatabase();
   logger.info("Database initialized");
-  loadState();
+  await loadState();
   syncProjectMeta();
 
   const tanrenClient = createTanrenClient();
@@ -719,7 +721,7 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (chatJid: string, msg: NewMessage) => {
+    onMessage: async (chatJid: string, msg: NewMessage) => {
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
@@ -733,15 +735,17 @@ async function main(): Promise<void> {
           return;
         }
       }
-      storeMessage(msg);
+      await storeMessage(msg);
     },
-    onChatMetadata: (
+    onChatMetadata: async (
       chatJid: string,
       timestamp: string,
       name?: string,
       channel?: string,
       isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    ) => {
+      await storeChatMetadata(chatJid, timestamp, name, channel, isGroup);
+    },
     registeredGroups: () => registeredGroups,
   };
 
@@ -835,13 +839,13 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
-  queue.onRetriesExhausted = (groupJid: string) => {
+  queue.onRetriesExhausted = async (groupJid: string) => {
     if (pendingTailDrain.delete(groupJid)) {
-      savePendingTailDrain();
+      await savePendingTailDrain();
       logger.info({ groupJid }, "Cleared stale pendingTailDrain after retry exhaustion");
     }
   };
-  recoverPendingMessages();
+  await recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, "Message loop crashed unexpectedly");
     process.exit(1);

@@ -33,7 +33,7 @@ export class GroupQueue {
   private waitingGroups: string[] = [];
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null = null;
   private shuttingDown = false;
-  onRetriesExhausted: ((groupJid: string) => void) | null = null;
+  onRetriesExhausted: ((groupJid: string) => void | Promise<void>) | null = null;
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);

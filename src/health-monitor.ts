@@ -33,14 +33,14 @@ export interface HealthSource {
 export interface HealthMonitorDeps {
   sources: HealthSource[];
   sendEmbed: (jid: string, embed: DiscordEmbed) => Promise<void>;
-  getState: (key: string) => string | undefined;
-  setState: (key: string, value: string) => void;
+  getState: (key: string) => Promise<string | undefined>;
+  setState: (key: string, value: string) => Promise<void>;
   config: HealthMonitorConfig;
 }
 
 let monitorRunning = false;
 
-export function startHealthMonitor(deps: HealthMonitorDeps): void {
+export async function startHealthMonitor(deps: HealthMonitorDeps): Promise<void> {
   if (monitorRunning) {
     logger.debug("Health monitor already running, skipping duplicate start");
     return;
@@ -51,7 +51,7 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
 
   // Initialize from persisted state
   for (const source of deps.sources) {
-    const persisted = deps.getState(`health_status_${source.name}`);
+    const persisted = await deps.getState(`health_status_${source.name}`);
     if (persisted !== undefined) {
       lastHealthState.set(source.name, persisted === "true");
     }
@@ -100,12 +100,12 @@ async function pollSource(
         // If all sends failed, keep previous state so the transition retries next poll.
         if (anySendSucceeded || jids.length === 0) {
           lastHealthState.set(source.name, status.healthy);
-          deps.setState(`health_status_${source.name}`, String(status.healthy));
+          await deps.setState(`health_status_${source.name}`, String(status.healthy));
         }
       } else {
         // No transition — still commit current state (idempotent, no notification needed)
         lastHealthState.set(source.name, status.healthy);
-        deps.setState(`health_status_${source.name}`, String(status.healthy));
+        await deps.setState(`health_status_${source.name}`, String(status.healthy));
       }
     }
   } catch (err) {
@@ -116,14 +116,14 @@ async function pollSource(
   // Event polling
   try {
     const cursorKey = `events_cursor_${source.name}`;
-    const rawCursor = deps.getState(cursorKey) ?? null;
+    const rawCursor = (await deps.getState(cursorKey)) ?? null;
     const { events, cursor: newCursor } = await source.fetchEvents(rawCursor);
 
     // On first run (rawCursor was null), skip posting — cursor was just initialized.
     // Commit cursor immediately since there's nothing to deliver.
     if (rawCursor === null) {
       if (newCursor !== null) {
-        deps.setState(cursorKey, newCursor);
+        await deps.setState(cursorKey, newCursor);
       }
     } else {
       let allDelivered = true;
@@ -149,7 +149,7 @@ async function pollSource(
       // Only advance cursor after successful delivery.
       // If any event failed all sends, keep old cursor to retry next poll.
       if (allDelivered && newCursor !== null) {
-        deps.setState(cursorKey, newCursor);
+        await deps.setState(cursorKey, newCursor);
       }
     }
   } catch (err) {

@@ -30,6 +30,8 @@ const envConfig = readEnvFile([
   "CONTAINER_TIMEOUT",
   "CONTAINER_MAX_OUTPUT_SIZE",
   "CREDENTIAL_PROXY_PORT",
+  "DB_BACKEND",
+  "DATABASE_URL",
   "IDLE_TIMEOUT",
   "MAX_CONCURRENT_CONTAINERS",
 ]);
@@ -90,5 +92,11 @@ export const TRIGGER_PATTERN = new RegExp(`^@${escapeRegex(ASSISTANT_NAME)}\\b`,
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const DB_BACKEND = (process.env.DB_BACKEND || envConfig.DB_BACKEND || "sqlite") as
+  | "sqlite"
+  | "postgres";
+export const DATABASE_URL =
+  process.env.DATABASE_URL || envConfig.DATABASE_URL || path.join(STORE_DIR, "messages.db");
 
 export const TANREN_API_URL = process.env.TANREN_API_URL || "";

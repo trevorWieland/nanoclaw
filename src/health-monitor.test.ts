@@ -51,8 +51,10 @@ function createDeps(overrides?: Partial<HealthMonitorDeps>): HealthMonitorDeps {
   return {
     sources: [createMockSource("test")],
     sendEmbed: vi.fn<(jid: string, embed: unknown) => Promise<void>>().mockResolvedValue(undefined),
-    getState: vi.fn((key: string) => state.get(key)),
-    setState: vi.fn((key: string, value: string) => state.set(key, value)),
+    getState: vi.fn(async (key: string) => state.get(key)),
+    setState: vi.fn(async (key: string, value: string) => {
+      state.set(key, value);
+    }),
     config: createConfig(),
     ...overrides,
   };
@@ -147,8 +149,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -165,8 +169,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -184,8 +190,10 @@ describe("Health Monitor", () => {
       const source = createMockSource("test");
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -209,8 +217,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -275,8 +285,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         sendEmbed,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -308,8 +320,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         sendEmbed,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -368,8 +382,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -392,8 +408,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -427,8 +445,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         sendEmbed,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -467,8 +487,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         sendEmbed,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -496,8 +518,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -558,8 +582,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         sendEmbed,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -580,8 +606,10 @@ describe("Health Monitor", () => {
 
       const deps = createDeps({
         sources: [source],
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -676,8 +704,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         config,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
@@ -717,8 +747,10 @@ describe("Health Monitor", () => {
       const deps = createDeps({
         sources: [source],
         config,
-        getState: vi.fn((key: string) => state.get(key)),
-        setState: vi.fn((key: string, value: string) => state.set(key, value)),
+        getState: vi.fn(async (key: string) => state.get(key)),
+        setState: vi.fn(async (key: string, value: string) => {
+          state.set(key, value);
+        }),
       });
 
       startHealthMonitor(deps);
