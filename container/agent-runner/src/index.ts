@@ -40,7 +40,7 @@ type ContainerInput = z.infer<typeof ContainerInputSchema>;
 
 const FollowUpMessageSchema = z.object({
   type: z.literal("message"),
-  text: z.string(),
+  text: z.string().min(1),
 });
 
 interface ContainerOutput {
