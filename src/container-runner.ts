@@ -182,6 +182,9 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     );
   }
 
+  // Claude SDK writes debug logs here; appendFileSync fails if directory is missing
+  fs.mkdirSync(path.join(groupSessionsDir, "debug"), { recursive: true });
+
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(APP_DIR, "container", "skills");
   const skillsDst = path.join(groupSessionsDir, "skills");
@@ -304,7 +307,7 @@ function buildContainerArgs(
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
     } else {
-      args.push("-v", `${mount.hostPath}:${mount.containerPath}`);
+      args.push("--mount", `type=bind,source=${mount.hostPath},target=${mount.containerPath}`);
     }
   }
 

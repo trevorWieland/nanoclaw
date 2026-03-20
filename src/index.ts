@@ -23,6 +23,7 @@ import {
   TRIGGER_PATTERN,
 } from "./config.js";
 import { startCredentialProxy } from "./credential-proxy.js";
+import { loadDeclarativeGroups } from "./declarative-groups.js";
 import "./channels/index.js";
 import { getChannelFactory, getRegisteredChannelNames } from "./channels/registry.js";
 import {
@@ -650,6 +651,21 @@ async function main(): Promise<void> {
   logger.info("Database initialized");
   await loadState();
   syncProjectMeta();
+
+  // Declarative group registration (for container deployments via registered-groups.json)
+  for (const { jid, group } of loadDeclarativeGroups()) {
+    const existing = registeredGroups[jid];
+    if (!existing) {
+      await registerGroup(jid, group);
+    } else {
+      const { added_at: _ea, ...existingFields } = existing;
+      const { added_at: _da, ...declaredFields } = group;
+      if (JSON.stringify(existingFields) !== JSON.stringify(declaredFields)) {
+        group.added_at = existing.added_at;
+        await registerGroup(jid, group);
+      }
+    }
+  }
 
   const tanrenClient = createTanrenClient();
   if (tanrenClient) {

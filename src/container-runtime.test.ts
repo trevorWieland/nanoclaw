@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock config
 vi.mock("./config.js", () => ({
   INSTANCE_ID: "test1234",
+  CREDENTIAL_PROXY_EXTERNAL_URL: "",
+  AGENT_NETWORK: "",
 }));
 
 // Mock logger
@@ -39,9 +41,12 @@ beforeEach(() => {
 // --- Pure functions ---
 
 describe("readonlyMountArgs", () => {
-  it("returns -v flag with :ro suffix", () => {
+  it("returns --mount flag with bind and readonly", () => {
     const args = readonlyMountArgs("/host/path", "/container/path");
-    expect(args).toEqual(["-v", "/host/path:/container/path:ro"]);
+    expect(args).toEqual([
+      "--mount",
+      "type=bind,source=/host/path,target=/container/path,readonly",
+    ]);
   });
 });
 

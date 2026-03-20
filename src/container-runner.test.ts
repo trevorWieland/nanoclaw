@@ -28,7 +28,10 @@ const mockRuntime = vi.hoisted(() => ({
   CONTAINER_HOST_GATEWAY: "host.docker.internal",
   CONTAINER_RUNTIME_BIN: "docker",
   hostGatewayArgs: () => [] as string[],
-  readonlyMountArgs: (h: string, c: string) => ["-v", `${h}:${c}:ro`],
+  readonlyMountArgs: (h: string, c: string) => [
+    "--mount",
+    `type=bind,source=${h},target=${c},readonly`,
+  ],
   stopContainer: (name: string) => `docker stop ${name}`,
 }));
 
@@ -627,7 +630,7 @@ describe("container-runner main group mounts", () => {
       (arg) => arg.includes("project-meta") && arg.includes("/workspace/project"),
     );
     expect(projectMount).toBeDefined();
-    expect(projectMount).toContain(":ro");
+    expect(projectMount).toContain("readonly");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -661,7 +664,7 @@ describe("container-runner main group mounts", () => {
       (arg) => arg.includes("/tmp/nanoclaw-test-groups") && arg.includes("/workspace/groups"),
     );
     expect(crossGroupMount).toBeDefined();
-    expect(crossGroupMount).toContain(":ro");
+    expect(crossGroupMount).toContain("readonly");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -683,7 +686,7 @@ describe("container-runner main group mounts", () => {
         !arg.includes("/workspace/groups"),
     );
     expect(ownGroupMount).toBeDefined();
-    expect(ownGroupMount).not.toContain(":ro");
+    expect(ownGroupMount).not.toContain("readonly");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -699,6 +702,36 @@ describe("container-runner main group mounts", () => {
     const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
     const crossGroupMount = spawnArgs.find((arg) => arg.includes("/workspace/groups"));
     expect(crossGroupMount).toBeUndefined();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner session debug directory", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.mkdirSync).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("creates debug/ subdirectory in sessions dir before spawn", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const mkdirCalls = vi.mocked(fs.mkdirSync).mock.calls;
+    const debugDirCall = mkdirCalls.find(([p]) => p.toString().endsWith(".claude/debug"));
+    expect(debugDirCall).toBeDefined();
+    expect(debugDirCall![1]).toEqual({ recursive: true });
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
