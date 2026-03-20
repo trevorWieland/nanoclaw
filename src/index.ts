@@ -439,12 +439,7 @@ async function runAgent(
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = await getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
+  writeGroupsSnapshot(group.folder, isMain, availableGroups);
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -694,7 +689,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, "Shutdown signal received");
     proxyServer.close();
     statusServer.close();
-    await queue.shutdown(10000);
+    await queue.shutdown();
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
@@ -818,7 +813,7 @@ async function main(): Promise<void> {
       await Promise.all(channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)));
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   queue.onRetriesExhausted = async (groupJid: string) => {
