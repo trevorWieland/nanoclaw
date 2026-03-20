@@ -86,7 +86,7 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
     .then(() => setTimeout(poll, 0))
     .catch((err) => {
       logger.error(
-        { err },
+        { err, sources: deps.sources.map((s) => s.name) },
         "Health monitor: failed to initialize persisted state, starting with empty state",
       );
       setTimeout(poll, 0);

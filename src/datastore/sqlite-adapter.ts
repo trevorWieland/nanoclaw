@@ -534,7 +534,7 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
   try {
     database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`);
   } catch {
-    /* column already exists */
+    // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }
 
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
@@ -544,7 +544,7 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${assistantName}:%`);
   } catch {
-    /* column already exists */
+    // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -552,7 +552,7 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
     database.exec(`ALTER TABLE registered_groups ADD COLUMN is_main INTEGER DEFAULT 0`);
     database.exec(`UPDATE registered_groups SET is_main = 1 WHERE folder = 'main'`);
   } catch {
-    /* column already exists */
+    // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -566,6 +566,6 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
     database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
   } catch {
-    /* columns already exist */
+    // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }
 }

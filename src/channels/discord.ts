@@ -140,8 +140,11 @@ export class DiscordChannel implements Channel {
             repliedTo.author.displayName ||
             repliedTo.author.username;
           content = `[Reply to ${replyAuthor}] ${content}`;
-        } catch {
-          // Referenced message may have been deleted
+        } catch (err) {
+          logger.debug(
+            { err, messageId: message.reference?.messageId },
+            "Failed to fetch referenced message (may have been deleted)",
+          );
         }
       }
 

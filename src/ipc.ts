@@ -53,7 +53,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
         return stat.isDirectory() && f !== "errors";
       });
     } catch (err) {
-      logger.error({ err }, "Error reading IPC base directory");
+      logger.error({ err, ipcBaseDir }, "Error reading IPC base directory");
       setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
       return;
     }

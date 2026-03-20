@@ -476,7 +476,10 @@ export async function runContainerAgent(
               }
             });
           } catch (err) {
-            logger.warn({ group: group.name, error: err }, "Failed to parse streamed output chunk");
+            logger.warn(
+              { group: group.name, error: err, chunk: jsonStr },
+              "Failed to parse streamed output chunk",
+            );
           }
         }
       }

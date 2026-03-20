@@ -41,6 +41,23 @@ Your skill should contain the **instructions** Claude follows to add the feature
 - Test your skill or doc workflow on a fresh clone before submitting.
 - For fork-specific docs changes, verify links and cross-doc consistency.
 
+## Error Handling
+
+Catch blocks in this codebase fall into four categories:
+
+1. **Handled** — the error triggers recovery logic (retry, fallback, circuit-breaker trip)
+2. **Re-thrown with context** — caught, wrapped with additional context, then re-thrown
+3. **Logged with sufficient detail** — caught and logged with enough structured context to diagnose from logs alone
+4. **Swallowed** — caught with no logging or incomplete context (**avoid this**)
+
+### Guidelines
+
+- **Re-throw vs log-and-continue:** Re-throw when the caller needs to know the operation failed. Log-and-continue when the operation is best-effort and the system can proceed without it.
+- **Custom error classes:** Only create them when callers need `instanceof` branching (see `PartialSendError` in `src/types.ts` and `TanrenAPIError` in `src/tanren/errors.ts`).
+- **Required context in error logs:** Include the operation being attempted, group name/JID if applicable, and relevant IDs or input values that help reproduce the issue.
+- **Pino structured logging:** Object first, message second: `logger.warn({ err, groupJid }, "Failed to write IPC message")`. Never stringify errors — Pino serializes them automatically.
+- **Intentional suppression:** If a catch block must be empty, add a comment: `// Intentionally suppressed: <reason>`.
+
 ## Documentation Source of Truth
 
 Keep docs aligned to this split:
