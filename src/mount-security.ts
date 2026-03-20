@@ -26,11 +26,13 @@ const logger = pino({
 // Cache the allowlist in memory - only reloads on process restart
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
+let containerModeWarned = false;
 
 /** @internal - for tests only. */
 export function _resetMountSecurityForTests(): void {
   cachedAllowlist = null;
   allowlistLoadError = null;
+  containerModeWarned = false;
 }
 
 /**
@@ -280,6 +282,13 @@ export function validateMount(mount: AdditionalMount, isMain: boolean): MountVal
 
   let effectivePath: string;
   if (containerMode) {
+    if (!containerModeWarned) {
+      containerModeWarned = true;
+      logger.warn(
+        "Container mode: mount validation uses string-based path matching (no symlink resolution). " +
+          "Ensure allowed roots do not contain symlinks to sensitive directories.",
+      );
+    }
     effectivePath = expandedPath;
   } else {
     const realPath = getRealPath(expandedPath);

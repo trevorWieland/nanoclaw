@@ -219,8 +219,8 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(APP_DIR, "container", "agent-runner", "src");
   const groupAgentRunnerDir = path.join(DATA_DIR, "sessions", group.folder, "agent-runner-src");
+  fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
   if (fs.existsSync(agentRunnerSrc)) {
-    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
     for (const file of fs.readdirSync(agentRunnerSrc)) {
       const dest = path.join(groupAgentRunnerDir, file);
       if (!fs.existsSync(dest)) {

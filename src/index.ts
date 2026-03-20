@@ -164,6 +164,29 @@ async function registerGroup(jid: string, group: RegisteredGroup): Promise<void>
 }
 
 /**
+ * Compare a DB-loaded group with a declarative group, accounting for
+ * normalization differences (e.g., DB stores requiresTrigger:undefined as true,
+ * isMain:false as undefined). Returns true if the group config has changed.
+ */
+function declarativeGroupChanged(existing: RegisteredGroup, declared: RegisteredGroup): boolean {
+  if (existing.name !== declared.name) return true;
+  if (existing.folder !== declared.folder) return true;
+  if (existing.trigger !== declared.trigger) return true;
+  // DB normalizes undefined → true for requiresTrigger
+  const existingRT = existing.requiresTrigger ?? true;
+  const declaredRT = declared.requiresTrigger ?? true;
+  if (existingRT !== declaredRT) return true;
+  // DB normalizes false/undefined → undefined for isMain
+  const existingMain = existing.isMain || false;
+  const declaredMain = declared.isMain || false;
+  if (existingMain !== declaredMain) return true;
+  // containerConfig: compare serialized form (JSON round-trip preserves structure)
+  const existingCC = existing.containerConfig ? JSON.stringify(existing.containerConfig) : "";
+  const declaredCC = declared.containerConfig ? JSON.stringify(declared.containerConfig) : "";
+  return existingCC !== declaredCC;
+}
+
+/**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
@@ -657,13 +680,9 @@ async function main(): Promise<void> {
     const existing = registeredGroups[jid];
     if (!existing) {
       await registerGroup(jid, group);
-    } else {
-      const { added_at: _ea, ...existingFields } = existing;
-      const { added_at: _da, ...declaredFields } = group;
-      if (JSON.stringify(existingFields) !== JSON.stringify(declaredFields)) {
-        group.added_at = existing.added_at;
-        await registerGroup(jid, group);
-      }
+    } else if (declarativeGroupChanged(existing, group)) {
+      group.added_at = existing.added_at;
+      await registerGroup(jid, group);
     }
   }
 
