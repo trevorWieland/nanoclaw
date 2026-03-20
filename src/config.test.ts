@@ -93,6 +93,8 @@ describe("containerization config", () => {
     delete process.env.CONTAINER_IMAGE;
     delete process.env.CONTAINER_HOST_CONFIG_DIR;
     delete process.env.CONTAINER_HOST_DATA_DIR;
+    delete process.env.NANOCLAW_CONFIG_ROOT;
+    envFileData.current = {};
     vi.resetModules();
   });
 
@@ -129,6 +131,31 @@ describe("containerization config", () => {
     expect(mod.CONTAINER_HOST_DATA_DIR).toBe("/host/data");
   });
 
+  it("CONTAINER_HOST_CONFIG_DIR falls back to .env file", async () => {
+    delete process.env.CONTAINER_HOST_CONFIG_DIR;
+    envFileData.current = { CONTAINER_HOST_CONFIG_DIR: "/host/config" };
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_CONFIG_DIR).toBe("/host/config");
+  });
+
+  it("CONTAINER_HOST_DATA_DIR falls back to .env file", async () => {
+    delete process.env.CONTAINER_HOST_DATA_DIR;
+    envFileData.current = { CONTAINER_HOST_DATA_DIR: "/host/data" };
+    const mod = await import("./config.js");
+    expect(mod.CONTAINER_HOST_DATA_DIR).toBe("/host/data");
+  });
+
+  it("MOUNT_ALLOWLIST_PATH prefers CONFIG_ROOT over legacy path", async () => {
+    // Create a temp dir with the allowlist file so CONFIG_ROOT wins
+    const fs = await import("fs");
+    const tmpDir = fs.mkdtempSync("/tmp/nanoclaw-config-test-");
+    fs.writeFileSync(`${tmpDir}/mount-allowlist.json`, "{}");
+    process.env.NANOCLAW_CONFIG_ROOT = tmpDir;
+    const mod = await import("./config.js");
+    expect(mod.MOUNT_ALLOWLIST_PATH).toBe(`${tmpDir}/mount-allowlist.json`);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("re-exports APP_DIR from runtime-paths", async () => {
     const mod = await import("./config.js");
     expect(mod.APP_DIR).toBe(process.cwd());
@@ -137,6 +164,51 @@ describe("containerization config", () => {
   it("re-exports DATA_DIR from runtime-paths", async () => {
     const mod = await import("./config.js");
     expect(mod.DATA_DIR).toBe(path.join(process.cwd(), "data"));
+  });
+});
+
+describe("container network config", () => {
+  afterEach(() => {
+    delete process.env.AGENT_NETWORK;
+    delete process.env.CREDENTIAL_PROXY_EXTERNAL_URL;
+    envFileData.current = {};
+    vi.resetModules();
+  });
+
+  it("AGENT_NETWORK defaults to empty string", async () => {
+    const mod = await import("./config.js");
+    expect(mod.AGENT_NETWORK).toBe("");
+  });
+
+  it("AGENT_NETWORK reads from process.env", async () => {
+    process.env.AGENT_NETWORK = "my-network";
+    const mod = await import("./config.js");
+    expect(mod.AGENT_NETWORK).toBe("my-network");
+  });
+
+  it("AGENT_NETWORK falls back to .env file", async () => {
+    delete process.env.AGENT_NETWORK;
+    envFileData.current = { AGENT_NETWORK: "env-network" };
+    const mod = await import("./config.js");
+    expect(mod.AGENT_NETWORK).toBe("env-network");
+  });
+
+  it("CREDENTIAL_PROXY_EXTERNAL_URL defaults to empty string", async () => {
+    const mod = await import("./config.js");
+    expect(mod.CREDENTIAL_PROXY_EXTERNAL_URL).toBe("");
+  });
+
+  it("CREDENTIAL_PROXY_EXTERNAL_URL reads from process.env", async () => {
+    process.env.CREDENTIAL_PROXY_EXTERNAL_URL = "http://nanoclaw:3001";
+    const mod = await import("./config.js");
+    expect(mod.CREDENTIAL_PROXY_EXTERNAL_URL).toBe("http://nanoclaw:3001");
+  });
+
+  it("CREDENTIAL_PROXY_EXTERNAL_URL falls back to .env file", async () => {
+    delete process.env.CREDENTIAL_PROXY_EXTERNAL_URL;
+    envFileData.current = { CREDENTIAL_PROXY_EXTERNAL_URL: "http://proxy:3001" };
+    const mod = await import("./config.js");
+    expect(mod.CREDENTIAL_PROXY_EXTERNAL_URL).toBe("http://proxy:3001");
   });
 });
 

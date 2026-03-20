@@ -6,22 +6,17 @@ import { execFileSync, execSync } from "child_process";
 import fs from "fs";
 import os from "os";
 
-import { INSTANCE_ID } from "./config.js";
+import { CREDENTIAL_PROXY_EXTERNAL_URL, INSTANCE_ID } from "./config.js";
 import { logger } from "./logger.js";
+
+// Re-export container networking config so existing importers don't need changes
+export { AGENT_NETWORK, CREDENTIAL_PROXY_EXTERNAL_URL } from "./config.js";
 
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = "docker";
 
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY = "host.docker.internal";
-
-/** Full URL agents use to reach the credential proxy (e.g., http://nanoclaw:3001).
- * When set, used as ANTHROPIC_BASE_URL in agent containers instead of auto-detect. */
-export const CREDENTIAL_PROXY_EXTERNAL_URL = process.env.CREDENTIAL_PROXY_EXTERNAL_URL || "";
-
-/** Docker network to attach agent containers to (e.g., nanoclaw_default).
- * When set, passes --network to docker run. */
-export const AGENT_NETWORK = process.env.AGENT_NETWORK || "";
 
 /**
  * Address the credential proxy binds to.
@@ -68,9 +63,11 @@ export function hostGatewayArgs(): string[] {
   return [];
 }
 
-/** Returns CLI args for a readonly bind mount. */
+/** Returns CLI args for a readonly bind mount.
+ * Uses --mount type=bind instead of -v so Docker hard-errors on nonexistent paths
+ * rather than silently creating empty directories. */
 export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
-  return ["-v", `${hostPath}:${containerPath}:ro`];
+  return ["--mount", `type=bind,source=${hostPath},target=${containerPath},readonly`];
 }
 
 /** Returns the shell command to stop a container by name. */

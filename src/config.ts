@@ -24,11 +24,15 @@ export const INSTANCE_ID =
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
 const envConfig = readEnvFile([
+  "AGENT_NETWORK",
   "ASSISTANT_NAME",
   "CHANNEL_CONNECT_TIMEOUT",
+  "CONTAINER_HOST_CONFIG_DIR",
+  "CONTAINER_HOST_DATA_DIR",
   "CONTAINER_IMAGE",
   "CONTAINER_TIMEOUT",
   "CONTAINER_MAX_OUTPUT_SIZE",
+  "CREDENTIAL_PROXY_EXTERNAL_URL",
   "CREDENTIAL_PROXY_PORT",
   "STATUS_PORT",
   "STATUS_BIND_HOST",
@@ -49,7 +53,9 @@ const HOME_DIR = process.env.HOME || os.homedir();
 function resolveConfigWithLegacy(filename: string): string {
   const configPath = path.join(CONFIG_ROOT, filename);
   if (fs.existsSync(configPath)) return configPath;
-  return path.join(HOME_DIR, ".config", "nanoclaw", filename);
+  const legacyPath = path.join(HOME_DIR, ".config", "nanoclaw", filename);
+  if (fs.existsSync(legacyPath)) return legacyPath;
+  return configPath;
 }
 
 export const MOUNT_ALLOWLIST_PATH = resolveConfigWithLegacy("mount-allowlist.json");
@@ -62,8 +68,15 @@ export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
 
 // Docker mount source overrides — when NanoClaw runs in a container,
 // Docker -v sources must be host paths, not container-internal paths.
-export const CONTAINER_HOST_CONFIG_DIR = process.env.CONTAINER_HOST_CONFIG_DIR || "";
-export const CONTAINER_HOST_DATA_DIR = process.env.CONTAINER_HOST_DATA_DIR || "";
+export const CONTAINER_HOST_CONFIG_DIR =
+  process.env.CONTAINER_HOST_CONFIG_DIR || envConfig.CONTAINER_HOST_CONFIG_DIR || "";
+export const CONTAINER_HOST_DATA_DIR =
+  process.env.CONTAINER_HOST_DATA_DIR || envConfig.CONTAINER_HOST_DATA_DIR || "";
+
+// Container networking — also supports .env fallback for bare-metal deployments.
+export const AGENT_NETWORK = process.env.AGENT_NETWORK || envConfig.AGENT_NETWORK || "";
+export const CREDENTIAL_PROXY_EXTERNAL_URL =
+  process.env.CREDENTIAL_PROXY_EXTERNAL_URL || envConfig.CREDENTIAL_PROXY_EXTERNAL_URL || "";
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name] || envConfig[name];

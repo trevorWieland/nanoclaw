@@ -28,9 +28,20 @@ function createHostDir(name: string): string {
   return dir;
 }
 
+const mockContainerMode = vi.hoisted(() => ({
+  CONTAINER_HOST_CONFIG_DIR: "",
+  CONTAINER_HOST_DATA_DIR: "",
+}));
+
 vi.mock("./config.js", () => ({
   get MOUNT_ALLOWLIST_PATH() {
     return allowlistPath();
+  },
+  get CONTAINER_HOST_CONFIG_DIR() {
+    return mockContainerMode.CONTAINER_HOST_CONFIG_DIR;
+  },
+  get CONTAINER_HOST_DATA_DIR() {
+    return mockContainerMode.CONTAINER_HOST_DATA_DIR;
   },
 }));
 
@@ -45,6 +56,8 @@ import {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mount-sec-test-"));
   _resetMountSecurityForTests();
+  mockContainerMode.CONTAINER_HOST_CONFIG_DIR = "";
+  mockContainerMode.CONTAINER_HOST_DATA_DIR = "";
 });
 
 afterEach(() => {
@@ -335,5 +348,73 @@ describe("validateAdditionalMounts", () => {
       true,
     );
     expect(result).toHaveLength(2);
+  });
+});
+
+describe("container mode validation", () => {
+  it("skips existence check when in container mode", () => {
+    mockContainerMode.CONTAINER_HOST_CONFIG_DIR = "/host/config";
+    writeAllowlist({
+      allowedRoots: [{ path: "/host/projects", allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    // Path doesn't exist locally, but should pass in container mode
+    const result = validateMount({ hostPath: "/host/projects/my-repo" }, true);
+    expect(result.allowed).toBe(true);
+    expect(result.realHostPath).toBe("/host/projects/my-repo");
+  });
+
+  it("still rejects blocked patterns in container mode", () => {
+    mockContainerMode.CONTAINER_HOST_CONFIG_DIR = "/host/config";
+    writeAllowlist({
+      allowedRoots: [{ path: "/host", allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: "/host/.ssh/keys" }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("still validates allowed roots in container mode", () => {
+    mockContainerMode.CONTAINER_HOST_CONFIG_DIR = "/host/config";
+    writeAllowlist({
+      allowedRoots: [{ path: "/host/projects", allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: "/outside/projects/repo" }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("not under any allowed root");
+  });
+
+  it("matches allowed roots by string prefix in container mode", () => {
+    mockContainerMode.CONTAINER_HOST_DATA_DIR = "/host/data";
+    writeAllowlist({
+      allowedRoots: [{ path: "/host/projects", allowReadWrite: false }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: "/host/projects/deep/nested/repo" }, true);
+    expect(result.allowed).toBe(true);
+    expect(result.effectiveReadonly).toBe(true);
+  });
+
+  it("bare-metal mode still rejects nonexistent paths", () => {
+    // No CONTAINER_HOST_* set — bare metal mode
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: path.join(tmpDir, "nonexistent") }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("does not exist");
   });
 });

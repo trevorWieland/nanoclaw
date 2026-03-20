@@ -11,7 +11,11 @@ import os from "os";
 import path from "path";
 import pino from "pino";
 
-import { MOUNT_ALLOWLIST_PATH } from "./config.js";
+import {
+  CONTAINER_HOST_CONFIG_DIR,
+  CONTAINER_HOST_DATA_DIR,
+  MOUNT_ALLOWLIST_PATH,
+} from "./config.js";
 import { AdditionalMount, AllowedRoot, MountAllowlist } from "./types.js";
 
 const logger = pino({
@@ -22,11 +26,13 @@ const logger = pino({
 // Cache the allowlist in memory - only reloads on process restart
 let cachedAllowlist: MountAllowlist | null = null;
 let allowlistLoadError: string | null = null;
+let containerModeWarned = false;
 
 /** @internal - for tests only. */
 export function _resetMountSecurityForTests(): void {
   cachedAllowlist = null;
   allowlistLoadError = null;
+  containerModeWarned = false;
 }
 
 /**
@@ -174,20 +180,35 @@ function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): str
 }
 
 /**
- * Check if a real path is under an allowed root
+ * Detect whether NanoClaw is running inside a container (DooD mode).
+ * When true, host paths don't exist locally — skip filesystem validation.
  */
-function findAllowedRoot(realPath: string, allowedRoots: AllowedRoot[]): AllowedRoot | null {
+function isContainerMode(): boolean {
+  return !!(CONTAINER_HOST_CONFIG_DIR || CONTAINER_HOST_DATA_DIR);
+}
+
+/**
+ * Check if a path is under an allowed root.
+ * In container mode, uses string-based prefix matching (no filesystem access).
+ */
+function findAllowedRoot(
+  effectivePath: string,
+  allowedRoots: AllowedRoot[],
+  containerMode: boolean,
+): AllowedRoot | null {
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
-    const realRoot = getRealPath(expandedRoot);
 
-    if (realRoot === null) {
-      // Allowed root doesn't exist, skip it
-      continue;
+    let effectiveRoot: string;
+    if (containerMode) {
+      effectiveRoot = expandedRoot;
+    } else {
+      const realRoot = getRealPath(expandedRoot);
+      if (realRoot === null) continue;
+      effectiveRoot = realRoot;
     }
 
-    // Check if realPath is under realRoot
-    const relative = path.relative(realRoot, realPath);
+    const relative = path.relative(effectiveRoot, effectivePath);
     if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
       return root;
     }
@@ -252,32 +273,49 @@ export function validateMount(mount: AdditionalMount, isMain: boolean): MountVal
     };
   }
 
-  // Expand and resolve the host path
+  // Expand and resolve the host path.
+  // In container mode (DooD), host paths don't exist locally — skip filesystem
+  // validation and use the expanded path for pattern/root matching. The Docker
+  // daemon validates path existence on the host when using --mount type=bind.
   const expandedPath = expandPath(mount.hostPath);
-  const realPath = getRealPath(expandedPath);
+  const containerMode = isContainerMode();
 
-  if (realPath === null) {
-    return {
-      allowed: false,
-      reason: `Host path does not exist: "${mount.hostPath}" (expanded: "${expandedPath}")`,
-    };
+  let effectivePath: string;
+  if (containerMode) {
+    if (!containerModeWarned) {
+      containerModeWarned = true;
+      logger.warn(
+        "Container mode: mount validation uses string-based path matching (no symlink resolution). " +
+          "Ensure allowed roots do not contain symlinks to sensitive directories.",
+      );
+    }
+    effectivePath = expandedPath;
+  } else {
+    const realPath = getRealPath(expandedPath);
+    if (realPath === null) {
+      return {
+        allowed: false,
+        reason: `Host path does not exist: "${mount.hostPath}" (expanded: "${expandedPath}")`,
+      };
+    }
+    effectivePath = realPath;
   }
 
   // Check against blocked patterns
-  const blockedMatch = matchesBlockedPattern(realPath, allowlist.blockedPatterns);
+  const blockedMatch = matchesBlockedPattern(effectivePath, allowlist.blockedPatterns);
   if (blockedMatch !== null) {
     return {
       allowed: false,
-      reason: `Path matches blocked pattern "${blockedMatch}": "${realPath}"`,
+      reason: `Path matches blocked pattern "${blockedMatch}": "${effectivePath}"`,
     };
   }
 
   // Check if under an allowed root
-  const allowedRoot = findAllowedRoot(realPath, allowlist.allowedRoots);
+  const allowedRoot = findAllowedRoot(effectivePath, allowlist.allowedRoots, containerMode);
   if (allowedRoot === null) {
     return {
       allowed: false,
-      reason: `Path "${realPath}" is not under any allowed root. Allowed roots: ${allowlist.allowedRoots
+      reason: `Path "${effectivePath}" is not under any allowed root. Allowed roots: ${allowlist.allowedRoots
         .map((r) => expandPath(r.path))
         .join(", ")}`,
     };
@@ -316,7 +354,7 @@ export function validateMount(mount: AdditionalMount, isMain: boolean): MountVal
   return {
     allowed: true,
     reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ""}`,
-    realHostPath: realPath,
+    realHostPath: effectivePath,
     resolvedContainerPath: containerPath,
     effectiveReadonly,
   };

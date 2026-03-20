@@ -23,6 +23,7 @@ import {
   TRIGGER_PATTERN,
 } from "./config.js";
 import { startCredentialProxy } from "./credential-proxy.js";
+import { loadDeclarativeGroups } from "./declarative-groups.js";
 import "./channels/index.js";
 import { getChannelFactory, getRegisteredChannelNames } from "./channels/registry.js";
 import {
@@ -160,6 +161,29 @@ async function registerGroup(jid: string, group: RegisteredGroup): Promise<void>
   fs.mkdirSync(path.join(groupDir, "logs"), { recursive: true });
 
   logger.info({ jid, name: group.name, folder: group.folder }, "Group registered");
+}
+
+/**
+ * Compare a DB-loaded group with a declarative group, accounting for
+ * normalization differences (e.g., DB stores requiresTrigger:undefined as true,
+ * isMain:false as undefined). Returns true if the group config has changed.
+ */
+function declarativeGroupChanged(existing: RegisteredGroup, declared: RegisteredGroup): boolean {
+  if (existing.name !== declared.name) return true;
+  if (existing.folder !== declared.folder) return true;
+  if (existing.trigger !== declared.trigger) return true;
+  // DB normalizes undefined → true for requiresTrigger
+  const existingRT = existing.requiresTrigger ?? true;
+  const declaredRT = declared.requiresTrigger ?? true;
+  if (existingRT !== declaredRT) return true;
+  // DB normalizes false/undefined → undefined for isMain
+  const existingMain = existing.isMain || false;
+  const declaredMain = declared.isMain || false;
+  if (existingMain !== declaredMain) return true;
+  // containerConfig: compare serialized form (JSON round-trip preserves structure)
+  const existingCC = existing.containerConfig ? JSON.stringify(existing.containerConfig) : "";
+  const declaredCC = declared.containerConfig ? JSON.stringify(declared.containerConfig) : "";
+  return existingCC !== declaredCC;
 }
 
 /**
@@ -650,6 +674,17 @@ async function main(): Promise<void> {
   logger.info("Database initialized");
   await loadState();
   syncProjectMeta();
+
+  // Declarative group registration (for container deployments via registered-groups.json)
+  for (const { jid, group } of loadDeclarativeGroups()) {
+    const existing = registeredGroups[jid];
+    if (!existing) {
+      await registerGroup(jid, group);
+    } else if (declarativeGroupChanged(existing, group)) {
+      group.added_at = existing.added_at;
+      await registerGroup(jid, group);
+    }
+  }
 
   const tanrenClient = createTanrenClient();
   if (tanrenClient) {

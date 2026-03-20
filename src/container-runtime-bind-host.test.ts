@@ -30,6 +30,7 @@ async function loadRuntime(opts: {
   };
 
   vi.doMock("./logger.js", () => ({ logger }));
+  vi.doMock("./env.js", () => ({ readEnvFile: () => ({}) }));
   vi.doMock("os", async () => {
     const actual = await vi.importActual<typeof import("os")>("os");
     return {
