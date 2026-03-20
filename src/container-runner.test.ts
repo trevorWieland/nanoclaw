@@ -86,6 +86,7 @@ vi.mock("fs", async () => {
       readFileSync: vi.fn(() => ""),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      chownSync: vi.fn(),
       copyFileSync: vi.fn(),
       cpSync: vi.fn(),
     },
@@ -766,6 +767,110 @@ describe("container-runner CONTAINER_IMAGE validation", () => {
 
     // Should have spawned successfully
     expect(vi.mocked(spawn)).toHaveBeenCalled();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner session directory ownership", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.mkdirSync).mockClear();
+    vi.mocked(fs.chownSync).mockClear();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("chowns writable directories to 1000:1000 when running as root", async () => {
+    vi.spyOn(process, "getuid").mockReturnValue(0);
+    vi.spyOn(process, "getgid").mockReturnValue(0);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const chownCalls = vi.mocked(fs.chownSync).mock.calls;
+    const chownedPaths = chownCalls.map(([p]) => p.toString());
+
+    // All 5 writable mount roots should be chowned
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-groups/test-group");
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-data/cache/uv/test-group");
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-data/sessions/test-group/.claude");
+    expect(chownedPaths.some((p) => p.includes("/ipc/"))).toBe(true);
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src");
+
+    // All calls should use UID/GID 1000
+    for (const call of chownCalls) {
+      expect(call[1]).toBe(1000);
+      expect(call[2]).toBe(1000);
+    }
+
+    // Logs dir should NOT be chowned (not mounted in container)
+    expect(chownedPaths.some((p) => p.includes("/logs/"))).toBe(false);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("does NOT chown when running as non-root user", async () => {
+    vi.spyOn(process, "getuid").mockReturnValue(501);
+    vi.spyOn(process, "getgid").mockReturnValue(501);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    expect(vi.mocked(fs.chownSync)).not.toHaveBeenCalled();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("does NOT chown when running as UID 1000 (container node user)", async () => {
+    vi.spyOn(process, "getuid").mockReturnValue(1000);
+    vi.spyOn(process, "getgid").mockReturnValue(1000);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    expect(vi.mocked(fs.chownSync)).not.toHaveBeenCalled();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("skips symlinks during recursive chown (prevents symlink attacks)", async () => {
+    vi.spyOn(process, "getuid").mockReturnValue(0);
+    vi.spyOn(process, "getgid").mockReturnValue(0);
+
+    // Simulate a directory containing a symlink alongside a regular file
+    vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
+      const s = p.toString();
+      if (s === "/tmp/nanoclaw-test-groups/test-group") {
+        return [
+          { name: "legit-file.md", isDirectory: () => false, isSymbolicLink: () => false },
+          { name: "evil-symlink", isDirectory: () => false, isSymbolicLink: () => true },
+        ];
+      }
+      return [];
+    }) as unknown as typeof fs.readdirSync);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const chownedPaths = vi.mocked(fs.chownSync).mock.calls.map(([p]) => p.toString());
+
+    // The regular file should be chowned
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-groups/test-group/legit-file.md");
+    // The symlink should NOT be chowned
+    expect(chownedPaths).not.toContain("/tmp/nanoclaw-test-groups/test-group/evil-symlink");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);

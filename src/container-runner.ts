@@ -95,6 +95,27 @@ function resolveHostPath(internalPath: string): string {
   return internalPath;
 }
 
+/**
+ * Recursively chown a directory and all its contents.
+ * Used when the host process runs as root to grant the container's
+ * node user (UID 1000) write access to bind-mounted directories.
+ *
+ * Symlinks are skipped to prevent a container agent from creating a
+ * symlink to an arbitrary host path and tricking the root chown into
+ * changing ownership of the target.
+ */
+function chownRecursiveSync(dir: string, uid: number, gid: number): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      chownRecursiveSync(fullPath, uid, gid);
+    }
+    fs.chownSync(fullPath, uid, gid);
+  }
+  fs.chownSync(dir, uid, gid);
+}
+
 function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const groupDir = resolveGroupFolderPath(group.folder);
@@ -242,6 +263,18 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
       isMain,
     );
     mounts.push(...validatedMounts);
+  }
+
+  // When running as root (UID 0), bind-mounted directories inherit root ownership.
+  // The agent container runs as node (UID 1000) and needs write access to all
+  // writable mounts. Chown after all files are created (settings.json, skills, etc.).
+  const hostUid = process.getuid?.();
+  if (hostUid === 0) {
+    const CONTAINER_UID = 1000;
+    const CONTAINER_GID = 1000;
+    for (const dir of [groupDir, uvCacheDir, groupSessionsDir, groupIpcDir, groupAgentRunnerDir]) {
+      chownRecursiveSync(dir, CONTAINER_UID, CONTAINER_GID);
+    }
   }
 
   return mounts;

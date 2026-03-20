@@ -213,6 +213,83 @@ describe("validateMount", () => {
     expect(result.reason).toContain("blocked pattern");
   });
 
+  it("allows .credentials.json (does not substring-match 'credentials')", () => {
+    const credsFile = createHostDir(".credentials.json");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: credsFile }, true);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("still blocks directories named 'credentials'", () => {
+    const credsDir = createHostDir("credentials");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: credsDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("blocks paths containing a blocked pattern (e.g., id_rsa.pub)", () => {
+    const keyDir = createHostDir("id_rsa.pub");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: keyDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("blocks mid-name substring match (e.g., my_private_key.pem)", () => {
+    const keyDir = createHostDir("my_private_key.pem");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: keyDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("blocks dot-prefixed key files (e.g., .id_rsa.pub)", () => {
+    const keyDir = createHostDir(".id_rsa.pub");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: keyDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("blocks .env.local (substring match within dotfile)", () => {
+    const envDir = createHostDir(".env.local");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: envDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
   it("rejects path not under any allowed root", () => {
     const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "outside-test-"));
     writeAllowlist({
