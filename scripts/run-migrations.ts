@@ -59,7 +59,7 @@ const migrationVersions = entries
   .filter((e) => e.isDirectory() && /^\d+\.\d+\.\d+$/.test(e.name))
   .map((e) => e.name)
   .filter((v) => compareSemver(v, fromVersion) > 0 && compareSemver(v, toVersion) <= 0)
-  .sort(compareSemver);
+  .toSorted(compareSemver);
 
 const projectRoot = process.cwd();
 

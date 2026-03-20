@@ -78,47 +78,47 @@ export function validateConfig(input: unknown): HealthMonitorConfig {
   return { enabled, pollIntervalMs, sources, defaultRoutes };
 }
 
-function validateSourceConfig(input: unknown, path: string): SourceConfig {
+function validateSourceConfig(input: unknown, configPath: string): SourceConfig {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error(`${path} must be an object`);
+    throw new Error(`${configPath} must be an object`);
   }
   const obj = input as Record<string, unknown>;
   const enabled = obj.enabled !== undefined ? Boolean(obj.enabled) : false;
-  const routes = obj.routes !== undefined ? validateRoutes(obj.routes, `${path}.routes`) : [];
+  const routes = obj.routes !== undefined ? validateRoutes(obj.routes, `${configPath}.routes`) : [];
   return { enabled, routes };
 }
 
-function validateRoutes(input: unknown, path: string): RouteRule[] {
+function validateRoutes(input: unknown, configPath: string): RouteRule[] {
   if (!Array.isArray(input)) {
-    throw new Error(`${path} must be an array`);
+    throw new Error(`${configPath} must be an array`);
   }
-  return input.map((rule, i) => validateRouteRule(rule, `${path}[${i}]`));
+  return input.map((rule, i) => validateRouteRule(rule, `${configPath}[${i}]`));
 }
 
-function validateRouteRule(input: unknown, path: string): RouteRule {
+function validateRouteRule(input: unknown, configPath: string): RouteRule {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
-    throw new Error(`${path} must be an object`);
+    throw new Error(`${configPath} must be an object`);
   }
   const obj = input as Record<string, unknown>;
 
   if (!Array.isArray(obj.eventTypes)) {
-    throw new Error(`${path}.eventTypes must be a string array`);
+    throw new Error(`${configPath}.eventTypes must be a string array`);
   }
   for (const et of obj.eventTypes) {
     if (typeof et !== "string") {
-      throw new Error(`${path}.eventTypes must be a string array`);
+      throw new Error(`${configPath}.eventTypes must be a string array`);
     }
   }
 
   if (!Array.isArray(obj.jids)) {
-    throw new Error(`${path}.jids must be a string array`);
+    throw new Error(`${configPath}.jids must be a string array`);
   }
   if (obj.jids.length === 0) {
-    throw new Error(`${path}.jids must not be empty`);
+    throw new Error(`${configPath}.jids must not be empty`);
   }
   for (const jid of obj.jids) {
     if (typeof jid !== "string" || jid === "") {
-      throw new Error(`${path}.jids must contain non-empty strings`);
+      throw new Error(`${configPath}.jids must contain non-empty strings`);
     }
   }
 

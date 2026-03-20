@@ -361,7 +361,9 @@ export class DiscordChannel implements Channel {
           totalDeleted++;
           deletedThisIteration++;
           // Rate limit: 1 delete per 500ms to avoid 429s
-          await new Promise((r) => setTimeout(r, 500));
+          await new Promise((r) => {
+            setTimeout(r, 500);
+          });
         } catch (err) {
           logger.warn({ jid, messageId: msg.id, err }, "Individual delete failed");
         }
