@@ -12,10 +12,12 @@ import fs from "fs";
 import path from "path";
 
 import {
+  CONTAINER_CPU_LIMIT,
   CONTAINER_HOST_CONFIG_DIR,
   CONTAINER_HOST_DATA_DIR,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_MEMORY_LIMIT,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
@@ -280,11 +282,16 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   return mounts;
 }
 
-function buildContainerArgs(
-  mounts: VolumeMount[],
-  containerName: string,
-  tanrenApiUrl?: string,
-): string[] {
+interface ContainerArgsOptions {
+  mounts: VolumeMount[];
+  containerName: string;
+  tanrenApiUrl?: string;
+  memoryLimit: string;
+  cpuLimit: string;
+}
+
+function buildContainerArgs(options: ContainerArgsOptions): string[] {
+  const { mounts, containerName, tanrenApiUrl, memoryLimit, cpuLimit } = options;
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
   args.push("--label", `nanoclaw.instance=${INSTANCE_ID}`);
 
@@ -336,6 +343,14 @@ function buildContainerArgs(
     args.push("--network", AGENT_NETWORK);
   }
 
+  // Resource limits — "0" means unlimited (Docker default)
+  if (memoryLimit !== "0") {
+    args.push("--memory", memoryLimit);
+  }
+  if (cpuLimit !== "0") {
+    args.push("--cpus", cpuLimit);
+  }
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
@@ -369,7 +384,15 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, "-");
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName, input.tanren?.apiUrl);
+  const memoryLimit = group.containerConfig?.memoryLimit || CONTAINER_MEMORY_LIMIT;
+  const cpuLimit = group.containerConfig?.cpuLimit || CONTAINER_CPU_LIMIT;
+  const containerArgs = buildContainerArgs({
+    mounts,
+    containerName,
+    tanrenApiUrl: input.tanren?.apiUrl,
+    memoryLimit,
+    cpuLimit,
+  });
 
   logger.debug(
     {
@@ -387,6 +410,8 @@ export async function runContainerAgent(
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
+      memoryLimit,
+      cpuLimit,
     },
     "Spawning container agent",
   );
@@ -646,6 +671,14 @@ export async function runContainerAgent(
 
       if (code !== 0) {
         const errorSummary = `Container exited with code ${code}: ${stderr.slice(-200)}`;
+
+        // Detect possible OOM kill (exit code 137 = SIGKILL) when memory limits are set
+        if (code === 137 && memoryLimit !== "0") {
+          logger.warn(
+            { group: group.name, containerName, memoryLimit },
+            "Container killed (possible OOM) — consider increasing CONTAINER_MEMORY_LIMIT or per-group memoryLimit",
+          );
+        }
 
         // Track auth errors in circuit breaker
         if (isAuthError(stderr) || isAuthError(stdout)) {

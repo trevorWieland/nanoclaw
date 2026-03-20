@@ -8,10 +8,12 @@ const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
 // Mutable mock data — override per-test via direct assignment
 const mockConfig = vi.hoisted(() => ({
+  CONTAINER_CPU_LIMIT: "2",
   CONTAINER_HOST_CONFIG_DIR: "",
   CONTAINER_HOST_DATA_DIR: "",
   CONTAINER_IMAGE: "nanoclaw-agent:latest",
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
+  CONTAINER_MEMORY_LIMIT: "4g",
   CONTAINER_TIMEOUT: 1800000, // 30min
   CREDENTIAL_PROXY_PORT: 3001,
   DATA_DIR: "/tmp/nanoclaw-test-data",
@@ -133,6 +135,7 @@ vi.mock("child_process", async () => {
 import { spawn } from "child_process";
 import fs from "fs";
 import { runContainerAgent, ContainerOutput } from "./container-runner.js";
+import { logger } from "./logger.js";
 import type { RegisteredGroup } from "./types.js";
 
 const testGroup: RegisteredGroup = {
@@ -156,10 +159,12 @@ function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: Co
 
 /** Reset mutable mock values to defaults between tests */
 function resetMocks() {
+  mockConfig.CONTAINER_CPU_LIMIT = "2";
   mockConfig.CONTAINER_HOST_CONFIG_DIR = "";
   mockConfig.CONTAINER_HOST_DATA_DIR = "";
   mockConfig.CONTAINER_IMAGE = "nanoclaw-agent:latest";
   mockConfig.CONTAINER_MAX_OUTPUT_SIZE = 10485760;
+  mockConfig.CONTAINER_MEMORY_LIMIT = "4g";
   mockConfig.CONTAINER_TIMEOUT = 1800000;
   mockConfig.CREDENTIAL_PROXY_PORT = 3001;
   mockConfig.DATA_DIR = "/tmp/nanoclaw-test-data";
@@ -875,5 +880,147 @@ describe("container-runner session directory ownership", () => {
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
+  });
+});
+
+describe("container-runner resource limits", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("includes --memory and --cpus with default values", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const memIdx = spawnArgs.indexOf("4g");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[memIdx - 1]).toBe("--memory");
+
+    const cpuIdx = spawnArgs.indexOf("2");
+    expect(cpuIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[cpuIdx - 1]).toBe("--cpus");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("per-group containerConfig overrides global defaults", async () => {
+    const groupWithLimits: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { memoryLimit: "8g", cpuLimit: "4" },
+    };
+    const resultPromise = runContainerAgent(groupWithLimits, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const memIdx = spawnArgs.indexOf("8g");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[memIdx - 1]).toBe("--memory");
+
+    const cpuIdx = spawnArgs.indexOf("4");
+    expect(cpuIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[cpuIdx - 1]).toBe("--cpus");
+
+    // Global defaults should NOT appear
+    expect(spawnArgs).not.toContain("4g");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("omits --memory when set to '0'", async () => {
+    mockConfig.CONTAINER_MEMORY_LIMIT = "0";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).not.toContain("--memory");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("omits --cpus when set to '0'", async () => {
+    mockConfig.CONTAINER_CPU_LIMIT = "0";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(spawnArgs).not.toContain("--cpus");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("env var overrides work for global defaults", async () => {
+    mockConfig.CONTAINER_MEMORY_LIMIT = "16g";
+    mockConfig.CONTAINER_CPU_LIMIT = "8";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const memIdx = spawnArgs.indexOf("16g");
+    expect(memIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[memIdx - 1]).toBe("--memory");
+
+    const cpuIdx = spawnArgs.indexOf("8");
+    expect(cpuIdx).toBeGreaterThan(-1);
+    expect(spawnArgs[cpuIdx - 1]).toBe("--cpus");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+});
+
+describe("container-runner OOM detection", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    vi.mocked(fs.readdirSync).mockReturnValue([]);
+    vi.mocked(logger.warn).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("logs possible OOM warning on exit code 137 with memory limit", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    fakeProc.emit("close", 137);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      expect.objectContaining({ memoryLimit: "4g" }),
+      expect.stringContaining("possible OOM"),
+    );
+  });
+
+  it("does not log OOM warning on exit code 137 without memory limit", async () => {
+    mockConfig.CONTAINER_MEMORY_LIMIT = "0";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    fakeProc.emit("close", 137);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    const oomCalls = vi
+      .mocked(logger.warn)
+      .mock.calls.filter(([, msg]) => typeof msg === "string" && msg.includes("possible OOM"));
+    expect(oomCalls).toHaveLength(0);
   });
 });
