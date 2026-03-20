@@ -28,7 +28,8 @@
     "discord.js": "^14.25.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.0.0",
-    "postgres": "^3.4.8"
+    "postgres": "^3.4.8",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

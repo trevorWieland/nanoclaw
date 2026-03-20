@@ -40,30 +40,23 @@ import {
 import { detectAuthMode } from "./credential-proxy.js";
 import { validateAdditionalMounts } from "./mount-security.js";
 import { isAuthError, recordAuthFailure, recordAuthSuccess } from "./auth-circuit-breaker.js";
+import {
+  ContainerInputSchema,
+  ContainerOutputSchema,
+  GroupsSnapshotSchema,
+  TaskSnapshotSchema,
+  type ContainerInput,
+  type ContainerOutput,
+  type TaskSnapshot,
+} from "./ipc-schemas.js";
 import { APP_DIR, CONFIG_ROOT } from "./runtime-paths.js";
 import { RegisteredGroup } from "./types.js";
+
+export type { ContainerOutput };
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
 const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
-
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  isScheduledTask?: boolean;
-  assistantName?: string;
-  tanren?: { apiUrl: string; apiKey: string };
-}
-
-export interface ContainerOutput {
-  status: "success" | "error";
-  result: string | null;
-  newSessionId?: string;
-  error?: string;
-}
 
 interface VolumeMount {
   hostPath: string;
@@ -416,6 +409,22 @@ export async function runContainerAgent(
     "Spawning container agent",
   );
 
+  // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway.
+  // Validate before spawning so a schema failure cannot leak an orphan container.
+  const containerInput = input.tanren
+    ? {
+        ...input,
+        tanren: {
+          ...input.tanren,
+          apiUrl: input.tanren.apiUrl.replace(
+            /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
+            `//${CONTAINER_HOST_GATEWAY}`,
+          ),
+        },
+      }
+    : input;
+  ContainerInputSchema.parse(containerInput);
+
   // Store host-side container logs outside the container-writable group directory.
   // This prevents symlink/hardlink redirection attacks from untrusted group content.
   const logsDir = path.join(DATA_DIR, "logs", group.folder);
@@ -433,19 +442,6 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway
-    const containerInput = input.tanren
-      ? {
-          ...input,
-          tanren: {
-            ...input.tanren,
-            apiUrl: input.tanren.apiUrl.replace(
-              /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
-              `//${CONTAINER_HOST_GATEWAY}`,
-            ),
-          },
-        }
-      : input;
     container.stdin.write(JSON.stringify(containerInput));
     container.stdin.end();
 
@@ -484,7 +480,16 @@ export async function runContainerAgent(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
+            const rawOutput = JSON.parse(jsonStr);
+            const validated = ContainerOutputSchema.safeParse(rawOutput);
+            if (!validated.success) {
+              logger.warn(
+                { group: group.name, issues: validated.error.issues, chunk: jsonStr },
+                "Container output failed schema validation",
+              );
+              continue;
+            }
+            const parsed = validated.data;
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
@@ -745,7 +750,7 @@ export async function runContainerAgent(
           jsonLine = lines[lines.length - 1];
         }
 
-        const output: ContainerOutput = JSON.parse(jsonLine);
+        const output = ContainerOutputSchema.parse(JSON.parse(jsonLine));
 
         logger.info(
           {
@@ -792,15 +797,7 @@ export async function runContainerAgent(
 export function writeTasksSnapshot(
   groupFolder: string,
   isMain: boolean,
-  tasks: Array<{
-    id: string;
-    groupFolder: string;
-    prompt: string;
-    schedule_type: string;
-    schedule_value: string;
-    status: string;
-    next_run: string | null;
-  }>,
+  tasks: TaskSnapshot,
 ): void {
   // Write filtered tasks to the group's IPC directory
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
@@ -809,6 +806,7 @@ export function writeTasksSnapshot(
   // Main sees all tasks, others only see their own
   const filteredTasks = isMain ? tasks : tasks.filter((t) => t.groupFolder === groupFolder);
 
+  TaskSnapshotSchema.parse(filteredTasks);
   const tasksFile = path.join(groupIpcDir, "current_tasks.json");
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
 }
@@ -836,16 +834,11 @@ export function writeGroupsSnapshot(
   // Main sees all groups; others see nothing (they can't activate groups)
   const visibleGroups = isMain ? groups : [];
 
+  const snapshot = {
+    groups: visibleGroups,
+    lastSync: new Date().toISOString(),
+  };
+  GroupsSnapshotSchema.parse(snapshot);
   const groupsFile = path.join(groupIpcDir, "available_groups.json");
-  fs.writeFileSync(
-    groupsFile,
-    JSON.stringify(
-      {
-        groups: visibleGroups,
-        lastSync: new Date().toISOString(),
-      },
-      null,
-      2,
-    ),
-  );
+  fs.writeFileSync(groupsFile, JSON.stringify(snapshot, null, 2));
 }
