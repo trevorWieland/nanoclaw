@@ -163,16 +163,14 @@ function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): str
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
-    // Check if any path component matches the pattern
+    // Check if any path component matches or starts with the pattern.
+    // startsWith (not includes) so that e.g. ".credentials.json" is NOT
+    // blocked by the "credentials" pattern, while "credentials.json",
+    // ".env.local", and "id_rsa.pub" are still caught.
     for (const part of pathParts) {
-      if (part === pattern || part.includes(pattern)) {
+      if (part === pattern || part.startsWith(pattern)) {
         return pattern;
       }
-    }
-
-    // Also check if the full path contains the pattern
-    if (realPath.includes(pattern)) {
-      return pattern;
     }
   }
 
