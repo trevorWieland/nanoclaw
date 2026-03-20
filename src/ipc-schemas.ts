@@ -161,7 +161,7 @@ export type ContainerInput = z.infer<typeof ContainerInputSchema>;
 export const FollowUpMessageSchema = z
   .object({
     type: z.literal("message"),
-    text: z.string(),
+    text: z.string().min(1),
   })
   .strict();
 

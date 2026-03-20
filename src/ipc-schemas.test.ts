@@ -527,6 +527,14 @@ describe("FollowUpMessageSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects empty text", () => {
+    const result = FollowUpMessageSchema.safeParse({
+      type: "message",
+      text: "",
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 // =========================================
