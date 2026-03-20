@@ -9,6 +9,7 @@ import {
   setRegisteredGroup,
 } from "./db.js";
 import { processTaskIpc, IpcDeps } from "./ipc.js";
+import { TaskIpcSchema } from "./ipc-schemas.js";
 import { RegisteredGroup } from "./types.js";
 
 // Set up registered groups used across tests
@@ -556,23 +557,16 @@ describe("schedule_task context_mode", () => {
     expect(tasks[0].context_mode).toBe("isolated");
   });
 
-  it("defaults invalid context_mode to isolated", async () => {
-    await processTaskIpc(
-      {
-        type: "schedule_task",
-        prompt: "bad context",
-        schedule_type: "once",
-        schedule_value: "2025-06-01T00:00:00",
-        context_mode: "bogus" as any,
-        targetJid: "other@g.us",
-      },
-      "whatsapp_main",
-      true,
-      deps,
-    );
-
-    const tasks = await getAllTasks();
-    expect(tasks[0].context_mode).toBe("isolated");
+  it("rejects invalid context_mode at schema level", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "schedule_task",
+      prompt: "bad context",
+      schedule_type: "once",
+      schedule_value: "2025-06-01T00:00:00",
+      context_mode: "bogus",
+      targetJid: "other@g.us",
+    });
+    expect(result.success).toBe(false);
   });
 
   it("defaults missing context_mode to isolated", async () => {
@@ -619,20 +613,14 @@ describe("register_group success", () => {
     expect(group!.trigger).toBe("@Andy");
   });
 
-  it("register_group rejects request with missing fields", async () => {
-    await processTaskIpc(
-      {
-        type: "register_group",
-        jid: "partial@g.us",
-        name: "Partial",
-        // missing folder and trigger
-      },
-      "whatsapp_main",
-      true,
-      deps,
-    );
-
-    expect(await getRegisteredGroup("partial@g.us")).toBeUndefined();
+  it("register_group rejects request with missing fields at schema level", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "register_group",
+      jid: "partial@g.us",
+      name: "Partial",
+      // missing folder and trigger
+    });
+    expect(result.success).toBe(false);
   });
 });
 

@@ -18,17 +18,30 @@ import fs from "fs";
 import path from "path";
 import { query, HookCallback, PreCompactHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { fileURLToPath } from "url";
+import { z } from "zod";
 
-interface ContainerInput {
-  prompt: string;
-  sessionId?: string;
-  groupFolder: string;
-  chatJid: string;
-  isMain: boolean;
-  isScheduledTask?: boolean;
-  assistantName?: string;
-  tanren?: { apiUrl: string; apiKey: string };
-}
+const ContainerInputSchema = z.object({
+  prompt: z.string(),
+  sessionId: z.string().optional(),
+  groupFolder: z.string(),
+  chatJid: z.string(),
+  isMain: z.boolean(),
+  isScheduledTask: z.boolean().optional(),
+  assistantName: z.string().optional(),
+  tanren: z
+    .object({
+      apiUrl: z.string(),
+      apiKey: z.string(),
+    })
+    .optional(),
+});
+
+type ContainerInput = z.infer<typeof ContainerInputSchema>;
+
+const FollowUpMessageSchema = z.object({
+  type: z.literal("message"),
+  text: z.string(),
+});
 
 interface ContainerOutput {
   status: "success" | "error";
@@ -297,10 +310,13 @@ function drainIpcInput(): string[] {
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+        const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
         fs.unlinkSync(filePath);
-        if (data.type === "message" && data.text) {
-          messages.push(data.text);
+        const parsed = FollowUpMessageSchema.safeParse(raw);
+        if (parsed.success) {
+          messages.push(parsed.data.text);
+        } else {
+          log(`Invalid IPC input message in ${file}: ${parsed.error.message}`);
         }
       } catch (err) {
         log(
@@ -532,7 +548,7 @@ async function main(): Promise<void> {
 
   try {
     const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
+    containerInput = ContainerInputSchema.parse(JSON.parse(stdinData));
     try {
       fs.unlinkSync("/tmp/input.json");
     } catch {
