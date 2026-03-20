@@ -157,6 +157,14 @@ function getRealPath(p: string): string | null {
 }
 
 /**
+ * Patterns that use exact component matching only (no substring).
+ * "credentials" is exact-only because ".credentials.json" (NanoClaw's
+ * OAuth token file) must be mountable, while "credentials" as a
+ * directory name is still blocked.
+ */
+const EXACT_MATCH_PATTERNS = new Set(["credentials"]);
+
+/**
  * Check if a path matches any blocked pattern
  */
 function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): string | null {
@@ -167,11 +175,9 @@ function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): str
       if (part === pattern) return pattern;
 
       // Substring match: catch "my_private_key.pem", "id_rsa.pub", ".env.local", etc.
-      // Skip when a dot-prefixed component (e.g. ".credentials.json") is matched
-      // against a non-dot pattern (e.g. "credentials") — this avoids blocking
-      // legitimate dotfiles that happen to contain a pattern as a substring.
-      const isDotfileVsBareName = part.startsWith(".") && !pattern.startsWith(".");
-      if (!isDotfileVsBareName && part.includes(pattern)) {
+      // Exact-match-only patterns skip this to avoid false positives on
+      // dotfiles like ".credentials.json".
+      if (!EXACT_MATCH_PATTERNS.has(pattern) && part.includes(pattern)) {
         return pattern;
       }
     }

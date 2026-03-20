@@ -264,6 +264,19 @@ describe("validateMount", () => {
     expect(result.reason).toContain("blocked pattern");
   });
 
+  it("blocks dot-prefixed key files (e.g., .id_rsa.pub)", () => {
+    const keyDir = createHostDir(".id_rsa.pub");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: keyDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
   it("blocks .env.local (substring match within dotfile)", () => {
     const envDir = createHostDir(".env.local");
     writeAllowlist({
