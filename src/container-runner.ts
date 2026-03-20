@@ -99,9 +99,14 @@ function resolveHostPath(internalPath: string): string {
  * Recursively chown a directory and all its contents.
  * Used when the host process runs as root to grant the container's
  * node user (UID 1000) write access to bind-mounted directories.
+ *
+ * Symlinks are skipped to prevent a container agent from creating a
+ * symlink to an arbitrary host path and tricking the root chown into
+ * changing ownership of the target.
  */
 function chownRecursiveSync(dir: string, uid: number, gid: number): void {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       chownRecursiveSync(fullPath, uid, gid);

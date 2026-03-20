@@ -846,4 +846,34 @@ describe("container-runner session directory ownership", () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
   });
+
+  it("skips symlinks during recursive chown (prevents symlink attacks)", async () => {
+    vi.spyOn(process, "getuid").mockReturnValue(0);
+    vi.spyOn(process, "getgid").mockReturnValue(0);
+
+    // Simulate a directory containing a symlink alongside a regular file
+    vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
+      const s = p.toString();
+      if (s === "/tmp/nanoclaw-test-groups/test-group") {
+        return [
+          { name: "legit-file.md", isDirectory: () => false, isSymbolicLink: () => false },
+          { name: "evil-symlink", isDirectory: () => false, isSymbolicLink: () => true },
+        ];
+      }
+      return [];
+    }) as unknown as typeof fs.readdirSync);
+
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const chownedPaths = vi.mocked(fs.chownSync).mock.calls.map(([p]) => p.toString());
+
+    // The regular file should be chowned
+    expect(chownedPaths).toContain("/tmp/nanoclaw-test-groups/test-group/legit-file.md");
+    // The symlink should NOT be chowned
+    expect(chownedPaths).not.toContain("/tmp/nanoclaw-test-groups/test-group/evil-symlink");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
 });

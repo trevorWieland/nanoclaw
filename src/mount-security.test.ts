@@ -238,7 +238,7 @@ describe("validateMount", () => {
     expect(result.reason).toContain("blocked pattern");
   });
 
-  it("blocks paths starting with a blocked pattern (e.g., id_rsa.pub)", () => {
+  it("blocks paths containing a blocked pattern (e.g., id_rsa.pub)", () => {
     const keyDir = createHostDir("id_rsa.pub");
     writeAllowlist({
       allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
@@ -251,7 +251,20 @@ describe("validateMount", () => {
     expect(result.reason).toContain("blocked pattern");
   });
 
-  it("blocks .env.local (startsWith .env)", () => {
+  it("blocks mid-name substring match (e.g., my_private_key.pem)", () => {
+    const keyDir = createHostDir("my_private_key.pem");
+    writeAllowlist({
+      allowedRoots: [{ path: tmpDir, allowReadWrite: true }],
+      blockedPatterns: [],
+      nonMainReadOnly: false,
+    });
+
+    const result = validateMount({ hostPath: keyDir }, true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("blocked pattern");
+  });
+
+  it("blocks .env.local (substring match within dotfile)", () => {
     const envDir = createHostDir(".env.local");
     writeAllowlist({
       allowedRoots: [{ path: tmpDir, allowReadWrite: true }],

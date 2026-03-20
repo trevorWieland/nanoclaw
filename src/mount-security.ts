@@ -163,12 +163,15 @@ function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): str
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
-    // Check if any path component matches or starts with the pattern.
-    // startsWith (not includes) so that e.g. ".credentials.json" is NOT
-    // blocked by the "credentials" pattern, while "credentials.json",
-    // ".env.local", and "id_rsa.pub" are still caught.
     for (const part of pathParts) {
-      if (part === pattern || part.startsWith(pattern)) {
+      if (part === pattern) return pattern;
+
+      // Substring match: catch "my_private_key.pem", "id_rsa.pub", ".env.local", etc.
+      // Skip when a dot-prefixed component (e.g. ".credentials.json") is matched
+      // against a non-dot pattern (e.g. "credentials") — this avoids blocking
+      // legitimate dotfiles that happen to contain a pattern as a substring.
+      const isDotfileVsBareName = part.startsWith(".") && !pattern.startsWith(".");
+      if (!isDotfileVsBareName && part.includes(pattern)) {
         return pattern;
       }
     }
