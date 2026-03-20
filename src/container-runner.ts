@@ -45,7 +45,7 @@ import { RegisteredGroup } from "./types.js";
 const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
 const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
-export interface ContainerInput {
+interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;

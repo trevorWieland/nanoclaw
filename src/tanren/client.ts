@@ -30,7 +30,7 @@ import type {
   VMSummary,
 } from "./types.js";
 
-export interface TanrenClientOptions {
+interface TanrenClientOptions {
   baseUrl: string;
   apiKey: string;
   timeoutMs?: number;

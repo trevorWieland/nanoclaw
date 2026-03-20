@@ -57,7 +57,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
   return null;
 }
 
-export interface SchedulerDependencies {
+interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;

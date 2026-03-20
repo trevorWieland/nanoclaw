@@ -1,6 +1,6 @@
 import type { DataStore } from "./types.js";
 
-export interface DataStoreConfig {
+interface DataStoreConfig {
   backend: "sqlite" | "postgres";
   url: string;
   assistantName: string;

@@ -218,7 +218,7 @@ function isValidContainerPath(containerPath: string): boolean {
   return true;
 }
 
-export interface MountValidationResult {
+interface MountValidationResult {
   allowed: boolean;
   reason: string;
   realHostPath?: string;
