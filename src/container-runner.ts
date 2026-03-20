@@ -472,12 +472,12 @@ export async function runContainerAgent(
               try {
                 await onOutput(parsed);
               } catch (err) {
-                logger.error({ group: group.name, error: err }, "Error in output callback");
+                logger.error({ group: group.name, err }, "Error in output callback");
               }
             });
           } catch (err) {
             logger.warn(
-              { group: group.name, error: err, chunk: jsonStr },
+              { group: group.name, err, chunk: jsonStr },
               "Failed to parse streamed output chunk",
             );
           }
@@ -566,7 +566,7 @@ export async function runContainerAgent(
           );
           outputChain
             .catch((err) => {
-              logger.error({ group: group.name, error: err }, "Output chain error");
+              logger.error({ group: group.name, err }, "Output chain error");
             })
             .then(() => {
               resolve({
@@ -681,7 +681,7 @@ export async function runContainerAgent(
       if (onOutput) {
         outputChain
           .catch((err) => {
-            logger.error({ group: group.name, error: err }, "Output chain error");
+            logger.error({ group: group.name, err }, "Output chain error");
           })
           .then(() => {
             logger.info(
@@ -731,7 +731,7 @@ export async function runContainerAgent(
             group: group.name,
             stdout,
             stderr,
-            error: err,
+            err,
           },
           "Failed to parse container output",
         );
@@ -746,7 +746,7 @@ export async function runContainerAgent(
 
     container.on("error", (err) => {
       clearTimeout(timeout);
-      logger.error({ group: group.name, containerName, error: err }, "Container spawn error");
+      logger.error({ group: group.name, containerName, err }, "Container spawn error");
       resolve({
         status: "error",
         result: null,

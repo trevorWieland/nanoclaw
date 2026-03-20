@@ -55,7 +55,7 @@ Catch blocks in this codebase fall into four categories:
 - **Re-throw vs log-and-continue:** Re-throw when the caller needs to know the operation failed. Log-and-continue when the operation is best-effort and the system can proceed without it.
 - **Custom error classes:** Only create them when callers need `instanceof` branching (see `PartialSendError` in `src/types.ts` and `TanrenAPIError` in `src/tanren/errors.ts`).
 - **Required context in error logs:** Include the operation being attempted, group name/JID if applicable, and relevant IDs or input values that help reproduce the issue.
-- **Pino structured logging:** Object first, message second: `logger.warn({ err, groupJid }, "Failed to write IPC message")`. Never stringify errors — Pino serializes them automatically.
+- **Pino structured logging:** Object first, message second: `logger.warn({ err, groupJid }, "Failed to write IPC message")`. Always pass errors under the `err` key (e.g. `{ err }`, not `{ error: err }`); never stringify errors — Pino serializes errors on the `err` key automatically.
 - **Intentional suppression:** If a catch block must be empty, add a comment: `// Intentionally suppressed: <reason>`.
 
 ## Documentation Source of Truth
