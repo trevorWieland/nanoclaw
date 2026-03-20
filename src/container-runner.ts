@@ -409,6 +409,22 @@ export async function runContainerAgent(
     "Spawning container agent",
   );
 
+  // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway.
+  // Validate before spawning so a schema failure cannot leak an orphan container.
+  const containerInput = input.tanren
+    ? {
+        ...input,
+        tanren: {
+          ...input.tanren,
+          apiUrl: input.tanren.apiUrl.replace(
+            /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
+            `//${CONTAINER_HOST_GATEWAY}`,
+          ),
+        },
+      }
+    : input;
+  ContainerInputSchema.parse(containerInput);
+
   // Store host-side container logs outside the container-writable group directory.
   // This prevents symlink/hardlink redirection attacks from untrusted group content.
   const logsDir = path.join(DATA_DIR, "logs", group.folder);
@@ -426,20 +442,6 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway
-    const containerInput = input.tanren
-      ? {
-          ...input,
-          tanren: {
-            ...input.tanren,
-            apiUrl: input.tanren.apiUrl.replace(
-              /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
-              `//${CONTAINER_HOST_GATEWAY}`,
-            ),
-          },
-        }
-      : input;
-    ContainerInputSchema.parse(containerInput);
     container.stdin.write(JSON.stringify(containerInput));
     container.stdin.end();
 

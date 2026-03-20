@@ -16,8 +16,8 @@ import { z } from "zod";
 export const IpcMessageSchema = z
   .object({
     type: z.literal("message"),
-    chatJid: z.string(),
-    text: z.string(),
+    chatJid: z.string().min(1),
+    text: z.string().min(1),
     sender: z.string().optional(),
   })
   .passthrough();
@@ -31,39 +31,39 @@ const ScheduleTaskSchema = z
   .object({
     type: z.literal("schedule_task"),
     taskId: z.string().optional(),
-    prompt: z.string(),
+    prompt: z.string().min(1),
     schedule_type: z.enum(["cron", "interval", "once"]),
-    schedule_value: z.string(),
+    schedule_value: z.string().min(1),
     context_mode: z.enum(["group", "isolated"]).optional(),
-    targetJid: z.string(),
+    targetJid: z.string().min(1),
   })
   .passthrough();
 
 const PauseTaskSchema = z
   .object({
     type: z.literal("pause_task"),
-    taskId: z.string(),
+    taskId: z.string().min(1),
   })
   .passthrough();
 
 const ResumeTaskSchema = z
   .object({
     type: z.literal("resume_task"),
-    taskId: z.string(),
+    taskId: z.string().min(1),
   })
   .passthrough();
 
 const CancelTaskSchema = z
   .object({
     type: z.literal("cancel_task"),
-    taskId: z.string(),
+    taskId: z.string().min(1),
   })
   .passthrough();
 
 const UpdateTaskSchema = z
   .object({
     type: z.literal("update_task"),
-    taskId: z.string(),
+    taskId: z.string().min(1),
     prompt: z.string().optional(),
     schedule_type: z.enum(["cron", "interval", "once"]).optional(),
     schedule_value: z.string().optional(),
@@ -73,10 +73,10 @@ const UpdateTaskSchema = z
 const RegisterGroupSchema = z
   .object({
     type: z.literal("register_group"),
-    jid: z.string(),
-    name: z.string(),
-    folder: z.string(),
-    trigger: z.string(),
+    jid: z.string().min(1),
+    name: z.string().min(1),
+    folder: z.string().min(1),
+    trigger: z.string().min(1),
     requiresTrigger: z.boolean().optional(),
     containerConfig: z
       .object({

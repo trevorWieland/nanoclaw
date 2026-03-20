@@ -77,6 +77,24 @@ describe("IpcMessageSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects empty chatJid", () => {
+    const result = IpcMessageSchema.safeParse({
+      type: "message",
+      chatJid: "",
+      text: "hello",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects empty text", () => {
+    const result = IpcMessageSchema.safeParse({
+      type: "message",
+      chatJid: "group@g.us",
+      text: "",
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 // =========================================
@@ -137,6 +155,58 @@ describe("TaskIpcSchema", () => {
       schedule_type: "weekly",
       schedule_value: "MON",
       targetJid: "group@g.us",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects schedule_task with empty prompt", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "schedule_task",
+      prompt: "",
+      schedule_type: "once",
+      schedule_value: "2026-01-01T00:00:00",
+      targetJid: "group@g.us",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects schedule_task with empty targetJid", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "schedule_task",
+      prompt: "do something",
+      schedule_type: "once",
+      schedule_value: "2026-01-01T00:00:00",
+      targetJid: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects pause_task with empty taskId", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "pause_task",
+      taskId: "",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects register_group with empty jid", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "register_group",
+      jid: "",
+      name: "Test",
+      folder: "test-group",
+      trigger: "@Bot",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects register_group with empty trigger", () => {
+    const result = TaskIpcSchema.safeParse({
+      type: "register_group",
+      jid: "group@g.us",
+      name: "Test",
+      folder: "test-group",
+      trigger: "",
     });
     expect(result.success).toBe(false);
   });
