@@ -108,8 +108,8 @@ async function loadState(): Promise<void> {
     for (const [key, val] of Object.entries(raw)) {
       lastAgentTimestamp[key] = typeof val === "string" ? { ts: val, id: "" } : val;
     }
-  } catch {
-    logger.warn("Corrupted last_agent_timestamp in DB, resetting");
+  } catch (err) {
+    logger.warn({ err, raw: agentTs }, "Corrupted last_agent_timestamp in DB, resetting");
     lastAgentTimestamp = {};
   }
   const tailDrainRaw = await getRouterState("pending_tail_drain");
@@ -124,8 +124,8 @@ async function loadState(): Promise<void> {
         pendingTailDrain.set(jid, cursor as { ts: string; id: string });
       }
     }
-  } catch {
-    logger.warn("Corrupted pending_tail_drain in DB, resetting");
+  } catch (err) {
+    logger.warn({ err, raw: tailDrainRaw }, "Corrupted pending_tail_drain in DB, resetting");
     pendingTailDrain.clear();
   }
   sessions = await getAllSessions();

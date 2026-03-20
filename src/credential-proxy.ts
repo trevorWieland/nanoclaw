@@ -117,11 +117,11 @@ async function executeRefresh(
       }
       if (err instanceof TypeError && attempt < REFRESH_MAX_RETRIES) {
         const delay = REFRESH_BASE_DELAY_MS * 2 ** attempt * (0.5 + Math.random() * 0.5);
-        logger.warn({ error: err, attempt }, "OAuth refresh network error, retrying");
+        logger.warn({ err, attempt }, "OAuth refresh network error, retrying");
         await sleep(delay);
         continue;
       }
-      logger.error({ error: err }, "OAuth token refresh failed");
+      logger.error({ err }, "OAuth token refresh failed");
       return null;
     } finally {
       clearTimeout(timeout);
