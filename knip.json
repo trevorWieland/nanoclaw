@@ -2,11 +2,11 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": ["scripts/*.ts"],
   "project": ["src/**/*.ts", "setup/**/*.ts", "scripts/**/*.ts"],
-  "ignoreDependencies": ["pino-pretty", "@vitest/coverage-v8"],
-  "ignoreExportsUsedInFile": true,
+  "ignoreDependencies": ["pino-pretty"],
+  "ignoreExportsUsedInFile": false,
   "rules": {
     "files": "error",
     "exports": "error",
-    "types": "warn"
+    "types": "error"
   }
 }

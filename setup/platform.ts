@@ -5,8 +5,8 @@ import { execSync } from "child_process";
 import fs from "fs";
 import os from "os";
 
-export type Platform = "macos" | "linux" | "unknown";
-export type ServiceManager = "launchd" | "systemd" | "none";
+type Platform = "macos" | "linux" | "unknown";
+type ServiceManager = "launchd" | "systemd" | "none";
 
 export function getPlatform(): Platform {
   const platform = os.platform();

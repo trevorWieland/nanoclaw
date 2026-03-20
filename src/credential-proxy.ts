@@ -29,7 +29,7 @@ import { checkCircuit, recordAuthFailure } from "./auth-circuit-breaker.js";
 import { readEnvFile } from "./env.js";
 import { logger } from "./logger.js";
 
-export type AuthMode = "api-key" | "oauth";
+type AuthMode = "api-key" | "oauth";
 
 const REFRESH_TIMEOUT_MS = 10_000;
 const REFRESH_MAX_RETRIES = 2;
@@ -132,7 +132,9 @@ async function executeRefresh(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 /**

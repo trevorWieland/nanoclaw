@@ -1,9 +1,7 @@
 import { ASSISTANT_NAME, DATABASE_URL, DB_BACKEND } from "./config.js";
 import { createDataStore, createTestDataStore } from "./datastore/index.js";
-import type { DataStore } from "./datastore/index.js";
+import type { ChatInfo, DataStore } from "./datastore/index.js";
 import type { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from "./types.js";
-
-export type { ChatInfo } from "./datastore/index.js";
 
 let store: DataStore;
 
@@ -35,7 +33,7 @@ export async function storeChatMetadata(
   return store.storeChatMetadata(chatJid, timestamp, name, channel, isGroup);
 }
 
-export async function getAllChats(): Promise<import("./datastore/index.js").ChatInfo[]> {
+export async function getAllChats(): Promise<ChatInfo[]> {
   return store.getAllChats();
 }
 

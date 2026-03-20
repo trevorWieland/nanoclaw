@@ -3,7 +3,7 @@
  * Extracted from index.ts for testability.
  */
 
-export interface CursorDecision {
+interface CursorDecision {
   shouldRollback: boolean;
   shouldEnqueue: boolean;
   shouldPersistTailDrain: boolean;

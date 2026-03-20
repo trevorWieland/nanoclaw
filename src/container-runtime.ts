@@ -96,7 +96,7 @@ export function ensureContainerRuntimeRunning(): void {
     console.error("║  2. Run: docker info                                           ║");
     console.error("║  3. Restart NanoClaw                                           ║");
     console.error("╚════════════════════════════════════════════════════════════════╝\n");
-    throw new Error("Container runtime is required but failed to start");
+    throw new Error("Container runtime is required but failed to start", { cause: err });
   }
 }
 

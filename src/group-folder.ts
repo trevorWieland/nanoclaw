@@ -15,7 +15,7 @@ export function isValidGroupFolder(folder: string): boolean {
   return true;
 }
 
-export function assertValidGroupFolder(folder: string): void {
+function assertValidGroupFolder(folder: string): void {
   if (!isValidGroupFolder(folder)) {
     throw new Error(`Invalid group folder "${folder}"`);
   }

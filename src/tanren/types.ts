@@ -249,7 +249,7 @@ export interface PreflightCompletedEvent {
   repairs?: string[];
 }
 
-export interface IntegrityRepairs {
+interface IntegrityRepairs {
   branch_switched?: boolean;
   spec_reverted?: boolean;
   plan_reverted?: boolean;

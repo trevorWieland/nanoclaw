@@ -30,7 +30,7 @@ import type {
   VMSummary,
 } from "./types.js";
 
-export interface TanrenClientOptions {
+interface TanrenClientOptions {
   baseUrl: string;
   apiKey: string;
   timeoutMs?: number;
@@ -217,7 +217,9 @@ export class TanrenClient {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 export function readTanrenConfig(): { apiUrl: string; apiKey: string } | null {

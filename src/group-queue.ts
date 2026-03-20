@@ -401,7 +401,7 @@ export class GroupQueue {
     };
   }
 
-  async shutdown(_gracePeriodMs: number): Promise<void> {
+  async shutdown(): Promise<void> {
     this.shuttingDown = true;
 
     // Count active containers but don't kill them — they'll finish on their own

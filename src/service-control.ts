@@ -2,11 +2,11 @@ import { spawn } from "child_process";
 import fs from "fs";
 import os from "os";
 
-export type RestartManager = "launchd" | "systemd-user" | "systemd-system" | "none";
-export const RESTART_COMMAND_TIMEOUT_MS = 30_000;
+type RestartManager = "launchd" | "systemd-user" | "systemd-system" | "none";
+const RESTART_COMMAND_TIMEOUT_MS = 30_000;
 const SAFE_RESTART_IDENTIFIER = /^[A-Za-z0-9_.:@-]+$/;
 
-export interface RestartPlanOptions {
+interface RestartPlanOptions {
   platform?: NodeJS.Platform;
   uid?: number | null;
   hasSystemd?: boolean;
@@ -14,13 +14,13 @@ export interface RestartPlanOptions {
   launchdLabel?: string;
 }
 
-export interface RestartPlan {
+interface RestartPlan {
   manager: RestartManager;
   command: RestartCommand | null;
   reason?: string;
 }
 
-export interface RestartResult extends RestartPlan {
+interface RestartResult extends RestartPlan {
   ok: boolean;
   error?: string;
 }
@@ -34,7 +34,7 @@ function detectSystemdOnLinux(): boolean {
   }
 }
 
-export interface RestartCommand {
+interface RestartCommand {
   bin: string;
   args: string[];
   display: string;
