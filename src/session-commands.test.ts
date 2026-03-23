@@ -217,4 +217,83 @@ describe("handleSessionCommand", () => {
     expect(result).toEqual({ handled: true, success: false });
     expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("Failed to process"));
   });
+
+  it("pre-compact callback streams text and calls closeStdin on session-update marker", async () => {
+    let preCompactCallCount = 0;
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        if (preCompactCallCount === 0) {
+          preCompactCallCount++;
+          // Stream a text result, then session-update marker
+          await onOutput({ status: "success", result: "Here is the summary" });
+          await onOutput({ status: "success", result: null });
+          return "success";
+        }
+        // Command phase — just succeed
+        return "success";
+      }),
+    });
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith("Here is the summary");
+    expect(deps.closeStdin).toHaveBeenCalled();
+    expect(deps.runAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("pre-compact partial failure advances cursor when output was already sent", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        // Pre-compact: stream output then fail
+        await onOutput({ status: "success", result: "partial output" });
+        return "error";
+      }),
+    });
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith("partial output");
+    expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("Failed to process"));
+    // Cursor advances to pre-compact msg timestamp, NOT the command timestamp
+    expect(deps.advanceCursor).toHaveBeenCalledWith("99");
+  });
+
+  it("handles object results via JSON.stringify in resultToText", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        await onOutput({ status: "success", result: { key: "value" } });
+        return "success";
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact")],
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith('{"key":"value"}');
+  });
 });

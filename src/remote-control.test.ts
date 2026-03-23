@@ -1,5 +1,6 @@
 import fs from "fs";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { logger } from "./logger.js";
 
 // Mock config before importing the module under test
 vi.mock("./config.js", () => ({
@@ -280,6 +281,7 @@ describe("remote-control", () => {
         return "";
       }) as any);
       vi.spyOn(process, "kill").mockImplementation((() => true) as any);
+      const logSpy = vi.spyOn(logger, "info");
 
       restoreRemoteControl();
 
@@ -287,6 +289,11 @@ describe("remote-control", () => {
       expect(active).not.toBeNull();
       expect(active!.pid).toBe(77777);
       expect(active!.url).toBe("https://claude.ai/code?bridge=env_restored");
+      expect(active!.startedInChat).toBe("tg:123");
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ pid: 77777, url: "https://claude.ai/code?bridge=env_restored" }),
+        "Restored Remote Control session from previous run",
+      );
     });
 
     it("clears state if process is dead", () => {

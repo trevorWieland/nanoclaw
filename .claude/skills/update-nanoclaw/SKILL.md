@@ -202,12 +202,48 @@ If conflicts:
   - `git rebase --abort`
   - Recommend merge instead.
 
+# Step 4.5: Post-merge cleanup
+
+After the merge/cherry-pick/rebase completes, run these cleanup steps before validation.
+
+## Install dependencies
+
+Check if `package.json` was modified by the merge:
+
+- `git diff <backup-tag-from-step-1>..HEAD -- package.json`
+
+If it was modified, run `pnpm install` (or `npm install` if this repo uses npm). This ensures new dependencies are available for the build and test steps.
+
+## Format and stage
+
+The merge may introduce formatting drift from upstream. Run the project formatter to normalize:
+
+- `pnpm run format:fix` (or the equivalent formatter command)
+- If any files changed: `git add -A && git commit -m "style: format after upstream merge"`
+
+This prevents the pre-commit hook from creating a dirty tree during later commits.
+
+## Flag tooling conflicts
+
+Check if the merge introduced config files that conflict with local tooling:
+
+- `git diff <backup-tag-from-step-1>..HEAD --name-only | grep -E '(\.eslintrc|eslint\.config|\.prettierrc|prettier\.config|package-lock\.json)'`
+
+If matches are found:
+
+- Warn the user: "The merge introduced upstream tooling files that may conflict with your local setup. Review these files."
+- List the conflicting files.
+- Use AskUserQuestion to ask: "Remove these conflicting tooling files?" with options:
+  - "Yes, remove them" (description: "Your fork uses different tooling — e.g. oxfmt/oxlint instead of prettier/eslint, pnpm instead of npm")
+  - "No, keep them" (description: "You want to adopt the upstream tooling")
+- If the user chooses to remove: delete the files, stage, and commit.
+
 # Step 5: Validation
 
 Run:
 
 - `pnpm run build`
-- `pnpm test` (do not fail the flow if tests are not configured)
+- If a `test:coverage` script exists in package.json, use `pnpm run test:coverage` instead of `pnpm test` to validate that coverage thresholds are still met after the merge. (Do not fail the flow if tests are not configured.)
 
 If build fails:
 
