@@ -19,7 +19,7 @@ import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { anchorTriggerWindow, findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
-import { handleSessionCommand } from "./session-commands.js";
+import { extractSessionCommand, handleSessionCommand } from "./session-commands.js";
 import {
   PartialSendError,
   type Channel,
@@ -254,6 +254,15 @@ export function createGroupProcessor(
       // so the message-loop poll guard doesn't block this group.
       if (pendingTailDrain.delete(chatJid)) {
         await deps.savePendingTailDrain();
+      }
+      // If there are messages after the command in the batch, re-enqueue so
+      // they get processed. The global "seen" cursor already advanced past
+      // the entire batch, so getNewMessages won't return them again.
+      const cmdIdx = missedMessages.findIndex(
+        (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
+      );
+      if (cmdIdx >= 0 && cmdIdx < missedMessages.length - 1) {
+        deps.queue.enqueueMessageCheck(chatJid);
       }
       return cmdResult.success;
     }

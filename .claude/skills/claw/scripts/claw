@@ -215,7 +215,10 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         # No structured output — print raw stdout
         print(stdout)
 
-    if proc.returncode not in (0, None):
+    # Don't fail on non-zero exit if we killed the container after receiving
+    # the output sentinel — the kill (SIGKILL → rc -9) is intentional since
+    # the Node.js event loop often keeps the process alive indefinitely.
+    if proc.returncode not in (0, None) and not done.is_set():
         sys.exit(proc.returncode)
 
 
@@ -273,7 +276,19 @@ def main():
     # Resolve group → jid
     jid = args.jid
     group_name = None
+    group_folder = None
     is_main = False
+
+    if args.jid:
+        # When using -j, resolve folder from the registered groups DB
+        g = next((g for g in groups if g["jid"] == args.jid), None)
+        if g:
+            group_name = g["name"]
+            group_folder = g["folder"]
+            is_main = g["is_main"]
+        else:
+            # JID not in DB — use JID as folder fallback
+            group_folder = args.jid
 
     if args.group:
         g = find_group(groups, args.group)
@@ -281,6 +296,7 @@ def main():
             sys.exit(f"error: group '{args.group}' not found. Run --list-groups to see options.")
         jid = g["jid"]
         group_name = g["name"]
+        group_folder = g["folder"]
         is_main = g["is_main"]
     elif not jid:
         # Default: main group
@@ -288,6 +304,7 @@ def main():
         if mains:
             jid = mains[0]["jid"]
             group_name = mains[0]["name"]
+            group_folder = mains[0]["folder"]
             is_main = True
         else:
             sys.exit("error: no group specified and no main group found. Use -g or -j.")
@@ -301,11 +318,10 @@ def main():
     payload: dict = {
         "prompt": prompt,
         "chatJid": jid,
+        "groupFolder": group_folder,
         "isMain": is_main,
         "secrets": secrets,
     }
-    if group_name:
-        payload["groupFolder"] = group_name
     if args.session:
         payload["sessionId"] = args.session
         payload["resumeAt"] = "latest"

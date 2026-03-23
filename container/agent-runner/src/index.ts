@@ -586,6 +586,12 @@ async function main(): Promise<void> {
     /* ignore */
   }
 
+  // --- Slash command detection (before IPC drain) ---
+  // Evaluate command status from the original prompt before appending drained
+  // IPC messages, so leftover IPC content doesn't break the exact-match check.
+  const KNOWN_SESSION_COMMANDS = new Set(["/compact"]);
+  const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(containerInput.prompt.trim());
+
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
@@ -597,12 +603,7 @@ async function main(): Promise<void> {
     prompt += "\n" + pending.join("\n");
   }
 
-  // --- Slash command handling ---
-  // Only known session slash commands are handled here. This prevents
-  // accidental interception of user prompts that happen to start with '/'.
-  const KNOWN_SESSION_COMMANDS = new Set(["/compact"]);
   const trimmedPrompt = prompt.trim();
-  const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(trimmedPrompt);
 
   if (isSessionSlashCommand) {
     log(`Handling session command: ${trimmedPrompt}`);
