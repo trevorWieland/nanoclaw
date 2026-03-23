@@ -11,6 +11,8 @@ on:
       - "pnpm-lock.yaml"
       - "tsconfig.json"
       - "src/**"
+      - "CLAUDE.md"
+      - "docs/**"
 
 jobs:
   build-host:
@@ -55,3 +57,4 @@ jobs:
           output=$(echo '{}' | timeout 30 docker run -i --rm nanoclaw-agent:ci 2>&1 || true)
           echo "$output"
           echo "$output" | grep -q -- '---NANOCLAW_OUTPUT_START---'
+          echo "$output" | grep -q -- '"status":"error"'
