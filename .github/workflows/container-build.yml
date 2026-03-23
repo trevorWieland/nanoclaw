@@ -1,0 +1,60 @@
+name: Container Build
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "container/**"
+      - ".dockerignore"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "tsconfig.json"
+      - "src/**"
+      - "CLAUDE.md"
+      - "docs/**"
+
+jobs:
+  build-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: nanoclaw:ci
+          cache-from: type=gha,scope=host
+          cache-to: type=gha,scope=host,mode=max
+
+      - name: Smoke test – module resolution
+        run: |
+          timeout 30 docker run --rm nanoclaw:ci \
+            node -e "import('./dist/index.js')"
+
+  build-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./container
+          push: false
+          load: true
+          tags: nanoclaw-agent:ci
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,scope=agent,mode=max
+
+      - name: Smoke test – agent boots and rejects invalid input
+        run: |
+          output=$(echo '{}' | timeout 30 docker run -i --rm nanoclaw-agent:ci 2>&1 || true)
+          echo "$output"
+          echo "$output" | grep -q -- '---NANOCLAW_OUTPUT_START---'
+          echo "$output" | grep -q -- '"status":"error"'
