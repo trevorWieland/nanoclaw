@@ -101,12 +101,16 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           const isMainGroup = group.isMain === true;
 
           // --- Session command interception (message loop) ---
-          // Scan ALL messages in the batch for a session command.
+          // Find the first *authorized* session command in the batch.
+          // Scanning only the first command could miss an admin /compact that
+          // follows an untrusted one in the same poll batch.
           const loopCmdMsg = groupMessages.find(
-            (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
+            (m) =>
+              extractSessionCommand(m.content, TRIGGER_PATTERN) !== null &&
+              isSessionCommandAllowed(isMainGroup, m.is_from_me === true),
           );
 
-          if (loopCmdMsg && isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
+          if (loopCmdMsg) {
             // Close active container (no-ops when no container is active) and
             // enqueue so processGroupMessages handles auth + cursor advancement.
             // Don't pipe via IPC — slash commands need a fresh container with
