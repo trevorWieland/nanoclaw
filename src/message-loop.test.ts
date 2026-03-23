@@ -68,6 +68,7 @@ describe("startMessageLoop", () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 

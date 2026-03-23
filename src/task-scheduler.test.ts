@@ -93,6 +93,7 @@ describe("task scheduler", () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 
@@ -189,6 +190,7 @@ describe("runTask via startSchedulerLoop", () => {
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.useRealTimers();
   });
 

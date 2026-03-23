@@ -19,12 +19,12 @@ import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { anchorTriggerWindow, findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
-import type {
-  Channel,
-  NewMessage,
+import {
   PartialSendError,
-  RegisteredGroup,
-  ScheduledTask,
+  type Channel,
+  type NewMessage,
+  type RegisteredGroup,
+  type ScheduledTask,
 } from "./types.js";
 
 interface GroupProcessorDeps {
@@ -340,15 +340,14 @@ export function createGroupProcessor(
               outputSentToUser = true;
             } catch (err) {
               hadSendError = true;
-              if ((err as { name?: string }).name === "PartialSendError") {
+              if (err instanceof PartialSendError) {
                 outputSentToUser = true;
-                const pse = err as PartialSendError;
                 logger.warn(
                   {
                     group: group.name,
                     chatJid,
-                    chunksSent: pse.chunksSent,
-                    totalChunks: pse.totalChunks,
+                    chunksSent: err.chunksSent,
+                    totalChunks: err.totalChunks,
                   },
                   "Partial send: some chunks delivered, skipping cursor rollback",
                 );
