@@ -8,21 +8,28 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 
 ## Key Files
 
-| File                                | Purpose                                                    |
-| ----------------------------------- | ---------------------------------------------------------- |
-| `src/index.ts`                      | Orchestrator: state, message loop, agent invocation        |
-| `src/channels/registry.ts`          | Channel registry (self-registration at startup)            |
-| `src/ipc.ts`                        | IPC watcher and task processing                            |
-| `src/router.ts`                     | Message formatting and outbound routing                    |
-| `src/config.ts`                     | Trigger pattern, paths, intervals                          |
-| `src/container-runner.ts`           | Spawns agent containers with mounts                        |
-| `src/task-scheduler.ts`             | Runs scheduled tasks                                       |
-| `src/db.ts`                         | SQLite operations                                          |
-| `src/tanren/`                       | Tanren API client (VM provisioning, dispatch)              |
-| `groups/{name}/CLAUDE.md`           | Per-group memory (isolated)                                |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| File                                | Purpose                                                         |
+| ----------------------------------- | --------------------------------------------------------------- |
+| `src/index.ts`                      | Orchestrator: state, message loop, agent invocation             |
+| `src/channels/registry.ts`          | Channel registry (self-registration at startup)                 |
+| `src/ipc.ts`                        | IPC watcher and task processing                                 |
+| `src/router.ts`                     | Message formatting and outbound routing                         |
+| `src/config.ts`                     | Trigger pattern, paths, intervals                               |
+| `src/container-runner.ts`           | Spawns agent containers with mounts                             |
+| `src/task-scheduler.ts`             | Runs scheduled tasks                                            |
+| `src/db.ts`                         | SQLite operations                                               |
+| `src/tanren/`                       | Tanren API client (VM provisioning, dispatch)                   |
+| `groups/{name}/CLAUDE.md`           | Per-group memory (isolated)                                     |
+| `container/skills/`                 | Skills loaded inside agent containers (browser, status, formatting) |
 
 ## Skills
+
+Four types of skills exist in NanoClaw. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full taxonomy and guidelines.
+
+- **Feature skills** — merge a `skill/*` branch to add capabilities (e.g. `/add-telegram`, `/add-slack`)
+- **Utility skills** — ship code files alongside SKILL.md (e.g. `/claw`)
+- **Operational skills** — instruction-only workflows, always on `main` (e.g. `/setup`, `/debug`)
+- **Container skills** — loaded inside agent containers at runtime (`container/skills/`)
 
 | Skill              | When to Use                                                    |
 | ------------------ | -------------------------------------------------------------- |
@@ -31,6 +38,10 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/debug`           | Container issues, logs, troubleshooting                        |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install      |
 | `/update-skills`   | Check for and apply updates to installed skill branches        |
+
+## Contributing
+
+Before creating a PR, adding a skill, or preparing any contribution, you MUST read [CONTRIBUTING.md](CONTRIBUTING.md). It covers accepted change types, the four skill types and their guidelines, SKILL.md format rules, PR requirements, and the pre-submission checklist (searching for existing PRs/issues, testing, description format).
 
 ## Development
 

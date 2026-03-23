@@ -243,6 +243,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
   unitLines.push(`WorkingDirectory=${projectRoot}`);
   unitLines.push("Restart=always");
   unitLines.push("RestartSec=5");
+  unitLines.push("KillMode=process");
   unitLines.push(`Environment=HOME=${homeDir}`);
   unitLines.push(`Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`);
   unitLines.push(`StandardOutput=append:${projectRoot}/logs/nanoclaw.log`);

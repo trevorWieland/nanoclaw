@@ -30,7 +30,9 @@ export interface IpcDeps {
     groupFolder: string,
     isMain: boolean,
     availableGroups: AvailableGroup[],
+    registeredJids: Set<string>,
   ) => void;
+  onTasksChanged: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -234,6 +236,7 @@ export async function processTaskIpc(
         created_at: new Date().toISOString(),
       });
       logger.info({ taskId, sourceGroup, targetFolder, contextMode }, "Task created via IPC");
+      deps.onTasksChanged();
       break;
     }
 
@@ -242,6 +245,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await updateTask(data.taskId, { status: "paused" });
         logger.info({ taskId: data.taskId, sourceGroup }, "Task paused via IPC");
+        deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task pause attempt");
       }
@@ -253,6 +257,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await updateTask(data.taskId, { status: "active" });
         logger.info({ taskId: data.taskId, sourceGroup }, "Task resumed via IPC");
+        deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task resume attempt");
       }
@@ -264,6 +269,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await deleteTask(data.taskId);
         logger.info({ taskId: data.taskId, sourceGroup }, "Task cancelled via IPC");
+        deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task cancel attempt");
       }
@@ -315,6 +321,7 @@ export async function processTaskIpc(
 
       await updateTask(data.taskId, updates);
       logger.info({ taskId: data.taskId, sourceGroup, updates }, "Task updated via IPC");
+      deps.onTasksChanged();
       break;
     }
 
@@ -325,7 +332,12 @@ export async function processTaskIpc(
         await deps.syncGroups(true);
         // Write updated snapshot immediately
         const availableGroups = await deps.getAvailableGroups();
-        deps.writeGroupsSnapshot(sourceGroup, true, availableGroups);
+        deps.writeGroupsSnapshot(
+          sourceGroup,
+          true,
+          availableGroups,
+          new Set(Object.keys(registeredGroups)),
+        );
       } else {
         logger.warn({ sourceGroup }, "Unauthorized refresh_groups attempt blocked");
       }

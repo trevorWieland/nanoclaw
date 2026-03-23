@@ -640,14 +640,24 @@ export async function runContainerAgent(
       const isError = code !== 0;
 
       if (isVerbose || isError) {
-        // Redact secrets before writing to log files
-        const redactedInput = input.tanren
-          ? { ...input, tanren: { ...input.tanren, apiKey: "[REDACTED]" } }
-          : input;
+        // On error, log input metadata only — not the full prompt.
+        // Full input is only included at verbose level to avoid
+        // persisting user conversation content on every non-zero exit.
+        if (isVerbose) {
+          // Redact secrets before writing to log files
+          const redactedInput = input.tanren
+            ? { ...input, tanren: { ...input.tanren, apiKey: "[REDACTED]" } }
+            : input;
+          logLines.push(`=== Input ===`, JSON.stringify(redactedInput, null, 2), ``);
+        } else {
+          logLines.push(
+            `=== Input Summary ===`,
+            `Prompt length: ${input.prompt.length} chars`,
+            `Session ID: ${input.sessionId || "new"}`,
+            ``,
+          );
+        }
         logLines.push(
-          `=== Input ===`,
-          JSON.stringify(redactedInput, null, 2),
-          ``,
           `=== Container Args ===`,
           containerArgs.join(" "),
           ``,
@@ -827,6 +837,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
+  _registeredJids?: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
