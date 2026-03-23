@@ -606,7 +606,11 @@ async function main(): Promise<void> {
   const trimmedPrompt = prompt.trim();
 
   if (isSessionSlashCommand) {
-    log(`Handling session command: ${trimmedPrompt}`);
+    // Use the original prompt for the SDK call, not the IPC-contaminated one.
+    // Drained IPC messages are irrelevant for slash commands and would prevent
+    // the SDK from recognizing the command.
+    const slashPrompt = containerInput.prompt.trim();
+    log(`Handling session command: ${slashPrompt}`);
     let slashSessionId: string | undefined;
     let compactBoundarySeen = false;
     let hadError = false;
@@ -614,7 +618,7 @@ async function main(): Promise<void> {
 
     try {
       for await (const message of query({
-        prompt: trimmedPrompt,
+        prompt: slashPrompt,
         options: {
           cwd: "/workspace/group",
           resume: sessionId,

@@ -255,14 +255,18 @@ export function createGroupProcessor(
       if (pendingTailDrain.delete(chatJid)) {
         await deps.savePendingTailDrain();
       }
-      // If there are messages after the command in the batch, re-enqueue so
-      // they get processed. The global "seen" cursor already advanced past
-      // the entire batch, so getNewMessages won't return them again.
-      const cmdIdx = missedMessages.findIndex(
-        (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
-      );
-      if (cmdIdx >= 0 && cmdIdx < missedMessages.length - 1) {
-        deps.queue.enqueueMessageCheck(chatJid);
+      // If the command succeeded and there are messages after it in the batch,
+      // re-enqueue so they get processed. The global "seen" cursor already
+      // advanced past the entire batch, so getNewMessages won't return them.
+      // Only enqueue on success — on failure the queue's retry backoff handles
+      // re-processing, and an immediate enqueue would bypass that backoff.
+      if (cmdResult.success) {
+        const cmdIdx = missedMessages.findIndex(
+          (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
+        );
+        if (cmdIdx >= 0 && cmdIdx < missedMessages.length - 1) {
+          deps.queue.enqueueMessageCheck(chatJid);
+        }
       }
       return cmdResult.success;
     }

@@ -14,6 +14,7 @@ interface RemoteControlSession {
 }
 
 let activeSession: RemoteControlSession | null = null;
+let startupInProgress = false;
 
 const URL_REGEX = /https:\/\/claude\.ai\/code\S+/;
 const URL_TIMEOUT_MS = 30_000;
@@ -76,6 +77,7 @@ export function getActiveSession(): RemoteControlSession | null {
 /** @internal — exported for testing only */
 export function _resetForTesting(): void {
   activeSession = null;
+  startupInProgress = false;
 }
 
 /** @internal — exported for testing only */
@@ -97,6 +99,13 @@ export async function startRemoteControl(
     activeSession = null;
     clearState();
   }
+
+  // Prevent concurrent startup races — two calls before URL discovery
+  // would both spawn detached processes with only one PID tracked.
+  if (startupInProgress) {
+    return { ok: false, error: "Remote Control startup already in progress" };
+  }
+  startupInProgress = true;
 
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
   // This prevents SIGPIPE when NanoClaw restarts.
@@ -144,7 +153,7 @@ export async function startRemoteControl(
   }
 
   // Poll the stdout file for the URL
-  return new Promise((resolve) => {
+  return new Promise<{ ok: true; url: string } | { ok: false; error: string }>((resolve) => {
     const startTime = Date.now();
 
     const poll = () => {
@@ -207,6 +216,8 @@ export async function startRemoteControl(
     };
 
     poll();
+  }).finally(() => {
+    startupInProgress = false;
   });
 }
 
