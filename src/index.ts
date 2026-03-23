@@ -265,7 +265,12 @@ async function main(): Promise<void> {
     msg: NewMessage,
   ): Promise<void> {
     const group = registeredGroups[chatJid];
-    if (!group?.isMain || !msg.is_from_me) {
+    // Admin check: is_from_me works for WhatsApp self-chat, but channels like
+    // Discord/Slack emit all human messages with is_from_me: false. Fall back to
+    // the sender allowlist — if the sender is explicitly allowed for this group,
+    // they're trusted enough for remote control.
+    const isAdmin = msg.is_from_me || isSenderAllowed(chatJid, msg.sender, loadSenderAllowlist());
+    if (!group?.isMain || !isAdmin) {
       logger.warn(
         { chatJid, sender: msg.sender },
         "Remote control rejected: not main group or not admin",

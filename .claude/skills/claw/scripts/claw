@@ -122,14 +122,18 @@ def find_group(groups: list[dict], query: str) -> dict | None:
 
 
 def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -> None:
-    cmd = [runtime, "run", "-i", "--rm", image]
-    dbg(f"cmd: {' '.join(cmd)}")
+    # Pass secrets as environment variables — the agent-runner reads credentials
+    # from the environment (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, etc.),
+    # not from the JSON payload.
+    secrets = payload.pop("secrets", {})
+    cmd = [runtime, "run", "-i", "--rm"]
+    for key, val in secrets.items():
+        cmd.extend(["-e", f"{key}={val}"])
+    cmd.append(image)
+    dbg(f"cmd: {' '.join(c if not c.startswith(('sk-', 'CLAUDE_')) else '***' for c in cmd)}")
 
-    # Show payload sans secrets
     if VERBOSE:
-        safe = {k: v for k, v in payload.items() if k != "secrets"}
-        safe["secrets"] = {k: "***" for k in payload.get("secrets", {})}
-        dbg(f"payload: {json.dumps(safe, indent=2)}")
+        dbg(f"payload: {json.dumps(payload, indent=2)}")
 
     proc = subprocess.Popen(
         cmd,
@@ -207,7 +211,7 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 if session_id:
                     print(f"\n[session: {session_id}]", file=sys.stderr)
             else:
-                print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
+                print(f"[{status}] {data.get('error') or data.get('result', '')}", file=sys.stderr)
                 sys.exit(1)
         except json.JSONDecodeError:
             print(match.group(1))
