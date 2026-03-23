@@ -14,6 +14,7 @@ import type { GroupQueue } from "./group-queue.js";
 import { logger } from "./logger.js";
 import { findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
+import { extractSessionCommand, isSessionCommandAllowed } from "./session-commands.js";
 import type { Channel, NewMessage, RegisteredGroup } from "./types.js";
 
 interface MessageLoopDeps {
@@ -25,7 +26,7 @@ interface MessageLoopDeps {
   lastTimestamp: () => string;
   setLastTimestamp: (ts: string) => void;
   saveState: () => Promise<void>;
-  queue: Pick<GroupQueue, "sendMessage" | "enqueueMessageCheck">;
+  queue: Pick<GroupQueue, "sendMessage" | "enqueueMessageCheck" | "closeStdin">;
 
   // DB
   getNewMessages: (
@@ -98,6 +99,28 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
+
+          // --- Session command interception (message loop) ---
+          // Scan ALL messages in the batch for a session command.
+          const loopCmdMsg = groupMessages.find(
+            (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
+          );
+
+          if (loopCmdMsg) {
+            // Only close active container if the sender is authorized — otherwise an
+            // untrusted user could kill in-flight work by sending /compact (DoS).
+            // closeStdin no-ops internally when no container is active.
+            if (isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
+              deps.queue.closeStdin(chatJid);
+            }
+            // Enqueue so processGroupMessages handles auth + cursor advancement.
+            // Don't pipe via IPC — slash commands need a fresh container with
+            // string prompt (not MessageStream) for SDK recognition.
+            deps.queue.enqueueMessageCheck(chatJid);
+            continue;
+          }
+          // --- End session command interception ---
+
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.

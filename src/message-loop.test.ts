@@ -53,6 +53,7 @@ function createMockDeps(
     queue: {
       sendMessage: vi.fn(() => false),
       enqueueMessageCheck: vi.fn(),
+      closeStdin: vi.fn(),
     },
     getNewMessages: vi.fn(async () => ({ messages: [], newTimestamp: "" })),
     getMessagesSince: vi.fn(async () => []),
@@ -207,6 +208,7 @@ describe("startMessageLoop", () => {
       queue: {
         sendMessage: vi.fn(() => true),
         enqueueMessageCheck: vi.fn(),
+        closeStdin: vi.fn(),
       },
     });
     void startMessageLoop(deps);

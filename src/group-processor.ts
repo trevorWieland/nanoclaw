@@ -19,6 +19,7 @@ import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { anchorTriggerWindow, findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
+import { handleSessionCommand } from "./session-commands.js";
 import {
   PartialSendError,
   type Channel,
@@ -218,6 +219,38 @@ export function createGroupProcessor(
       if (pendingTailDrain.delete(chatJid)) await deps.savePendingTailDrain();
       return true;
     }
+
+    // --- Session command interception (before trigger check) ---
+    const cmdResult = await handleSessionCommand({
+      missedMessages,
+      isMainGroup,
+      groupName: group.name,
+      triggerPattern: TRIGGER_PATTERN,
+      timezone: TIMEZONE,
+      deps: {
+        sendMessage: (text) => channel.sendMessage(chatJid, text),
+        setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+        runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
+        closeStdin: () => deps.queue.closeStdin(chatJid),
+        advanceCursor: (ts) => {
+          deps.setLastAgentTimestamp(chatJid, { ts, id: "" });
+          deps.saveState();
+        },
+        formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
+        canSenderInteract: (msg) => {
+          const hasTrigger = TRIGGER_PATTERN.test(msg.content.trim());
+          const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
+          return (
+            isMainGroup ||
+            !reqTrigger ||
+            (hasTrigger &&
+              (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+          );
+        },
+      },
+    });
+    if (cmdResult.handled) return cmdResult.success;
+    // --- End session command interception ---
 
     // Whether the trigger window was truncated (tail messages still need processing).
     // Only set for non-main groups with trigger requirements.
