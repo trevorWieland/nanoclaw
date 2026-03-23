@@ -266,4 +266,108 @@ describe("startMessageLoop", () => {
     await vi.advanceTimersByTimeAsync(1100);
     expect(callCount).toBe(2);
   });
+
+  describe("session command interception", () => {
+    it("closes stdin and enqueues for authorized session command", async () => {
+      const deps = createMockDeps({
+        registeredGroups: () => ({
+          "group@g.us": {
+            name: "Main",
+            folder: "main",
+            trigger: "@Andy",
+            added_at: "",
+            isMain: true,
+          },
+        }),
+        getNewMessages: vi.fn(async () => ({
+          messages: [
+            {
+              id: "1",
+              chat_jid: "group@g.us",
+              sender: "user1",
+              sender_name: "User",
+              content: "/compact",
+              timestamp: "2024-01-01T00:00:01Z",
+              is_from_me: true,
+            },
+          ],
+          newTimestamp: "2024-01-01T00:00:01Z",
+        })),
+      });
+      void startMessageLoop(deps);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(deps.queue.closeStdin).toHaveBeenCalledWith("group@g.us");
+      expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledWith("group@g.us");
+      // Should NOT fall through to pipe path
+      expect(deps.queue.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("falls through to normal processing for unauthorized session command", async () => {
+      const deps = createMockDeps({
+        registeredGroups: () => ({
+          "group@g.us": {
+            name: "Test",
+            folder: "test",
+            trigger: "@Andy",
+            added_at: "",
+            requiresTrigger: true,
+          },
+        }),
+        getNewMessages: vi.fn(async () => ({
+          messages: [
+            {
+              id: "1",
+              chat_jid: "group@g.us",
+              sender: "user1",
+              sender_name: "User",
+              content: "/compact",
+              timestamp: "2024-01-01T00:00:01Z",
+              is_from_me: false,
+            },
+          ],
+          newTimestamp: "2024-01-01T00:00:01Z",
+        })),
+      });
+      void startMessageLoop(deps);
+      await vi.advanceTimersByTimeAsync(10);
+      // Session command interception should NOT fire for unauthorized sender
+      expect(deps.queue.closeStdin).not.toHaveBeenCalled();
+      // Falls through to normal trigger check — "/compact" doesn't match trigger,
+      // so it should be skipped (no enqueue, no pipe)
+      expect(deps.queue.enqueueMessageCheck).not.toHaveBeenCalled();
+      expect(deps.queue.sendMessage).not.toHaveBeenCalled();
+    });
+
+    it("detects session command with trigger prefix", async () => {
+      const deps = createMockDeps({
+        registeredGroups: () => ({
+          "group@g.us": {
+            name: "Main",
+            folder: "main",
+            trigger: "@Andy",
+            added_at: "",
+            isMain: true,
+          },
+        }),
+        getNewMessages: vi.fn(async () => ({
+          messages: [
+            {
+              id: "1",
+              chat_jid: "group@g.us",
+              sender: "user1",
+              sender_name: "User",
+              content: "@Andy /compact",
+              timestamp: "2024-01-01T00:00:01Z",
+              is_from_me: true,
+            },
+          ],
+          newTimestamp: "2024-01-01T00:00:01Z",
+        })),
+      });
+      void startMessageLoop(deps);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(deps.queue.closeStdin).toHaveBeenCalledWith("group@g.us");
+      expect(deps.queue.enqueueMessageCheck).toHaveBeenCalledWith("group@g.us");
+    });
+  });
 });
