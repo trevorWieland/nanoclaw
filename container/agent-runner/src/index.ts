@@ -592,15 +592,19 @@ async function main(): Promise<void> {
   const KNOWN_SESSION_COMMANDS = new Set(["/compact"]);
   const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(containerInput.prompt.trim());
 
-  // Build initial prompt (drain any pending IPC messages too)
+  // Build initial prompt (drain any pending IPC messages too).
+  // Skip IPC drain for slash commands — they run in isolation and drained
+  // messages would be deleted but never processed, losing user input.
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += "\n" + pending.join("\n");
+  if (!isSessionSlashCommand) {
+    const pending = drainIpcInput();
+    if (pending.length > 0) {
+      log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+      prompt += "\n" + pending.join("\n");
+    }
   }
 
   const trimmedPrompt = prompt.trim();

@@ -123,6 +123,7 @@ export async function startRemoteControl(
   } catch (err: any) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
+    startupInProgress = false;
     return { ok: false, error: `Failed to start: ${err.message}` };
   }
 
@@ -149,6 +150,7 @@ export async function startRemoteControl(
 
   const pid = proc.pid;
   if (!pid) {
+    startupInProgress = false;
     return { ok: false, error: "Failed to get process PID" };
   }
 
