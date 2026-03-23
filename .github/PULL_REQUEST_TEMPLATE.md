@@ -1,4 +1,5 @@
 <!-- contributing-guide: v1 -->
+
 ## Type of Change
 
 - [ ] **Feature skill** - adds a channel or integration (source code changes + SKILL.md)

@@ -45,11 +45,7 @@ import { startMessageLoop } from "./message-loop.js";
 import { recoverPendingMessages } from "./recovery.js";
 import { restoreRemoteControl, startRemoteControl, stopRemoteControl } from "./remote-control.js";
 import { findChannel, formatOutbound } from "./router.js";
-import {
-  isSenderAllowed,
-  loadSenderAllowlist,
-  shouldDropMessage,
-} from "./sender-allowlist.js";
+import { isSenderAllowed, loadSenderAllowlist, shouldDropMessage } from "./sender-allowlist.js";
 import { syncProjectMeta } from "./project-meta.js";
 import { startSchedulerLoop } from "./task-scheduler.js";
 import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";

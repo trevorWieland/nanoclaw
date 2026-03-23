@@ -279,7 +279,6 @@ Tell the user:
   - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
   - If running manually: restart `pnpm run dev`
 
-
 ## Diagnostics
 
 Read and follow [diagnostics.md](diagnostics.md).
