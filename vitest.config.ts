@@ -10,12 +10,16 @@ export default defineConfig({
         "src/channels/index.ts",
         "src/datastore/index.ts",
         "src/tanren/index.ts",
+        // Thin wrappers with no testable logic.
+        "src/logger.ts",
+        // Being replaced by official Tanren MCP server + CLI.
+        "container/agent-runner/src/tanren-mcp-stdio.ts",
       ],
       thresholds: {
-        statements: 65,
-        branches: 62,
-        functions: 67,
-        lines: 66,
+        statements: 80,
+        branches: 75,
+        functions: 74,
+        lines: 80,
       },
     },
   },

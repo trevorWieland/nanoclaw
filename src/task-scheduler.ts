@@ -3,7 +3,7 @@ import { CronExpressionParser } from "cron-parser";
 import fs from "fs";
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from "./config.js";
-import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from "./container-runner.js";
+import { ContainerOutput, writeTasksSnapshot } from "./container-runner.js";
 import {
   getAllTasks,
   getDueTasks,
@@ -57,7 +57,7 @@ export function computeNextRun(task: ScheduledTask): string | null {
   return null;
 }
 
-interface SchedulerDependencies {
+export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
@@ -68,6 +68,20 @@ interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  runAgent: (
+    group: RegisteredGroup,
+    input: {
+      prompt: string;
+      sessionId?: string;
+      groupFolder: string;
+      chatJid: string;
+      isMain: boolean;
+      isScheduledTask?: boolean;
+      assistantName: string;
+    },
+    onProcess: (proc: ChildProcess, containerName: string) => void,
+    onOutput?: (output: ContainerOutput) => Promise<void>,
+  ) => Promise<ContainerOutput>;
 }
 
 async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promise<void> {
@@ -152,7 +166,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   };
 
   try {
-    const output = await runContainerAgent(
+    const output = await deps.runAgent(
       group,
       {
         prompt: task.prompt,
