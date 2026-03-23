@@ -32,7 +32,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
-  onTasksChanged: () => void;
+  onTasksChanged: () => void | Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -236,7 +236,7 @@ export async function processTaskIpc(
         created_at: new Date().toISOString(),
       });
       logger.info({ taskId, sourceGroup, targetFolder, contextMode }, "Task created via IPC");
-      deps.onTasksChanged();
+      await deps.onTasksChanged();
       break;
     }
 
@@ -245,7 +245,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await updateTask(data.taskId, { status: "paused" });
         logger.info({ taskId: data.taskId, sourceGroup }, "Task paused via IPC");
-        deps.onTasksChanged();
+        await deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task pause attempt");
       }
@@ -257,7 +257,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await updateTask(data.taskId, { status: "active" });
         logger.info({ taskId: data.taskId, sourceGroup }, "Task resumed via IPC");
-        deps.onTasksChanged();
+        await deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task resume attempt");
       }
@@ -269,7 +269,7 @@ export async function processTaskIpc(
       if (task && (isMain || task.group_folder === sourceGroup)) {
         await deleteTask(data.taskId);
         logger.info({ taskId: data.taskId, sourceGroup }, "Task cancelled via IPC");
-        deps.onTasksChanged();
+        await deps.onTasksChanged();
       } else {
         logger.warn({ taskId: data.taskId, sourceGroup }, "Unauthorized task cancel attempt");
       }
@@ -321,7 +321,7 @@ export async function processTaskIpc(
 
       await updateTask(data.taskId, updates);
       logger.info({ taskId: data.taskId, sourceGroup, updates }, "Task updated via IPC");
-      deps.onTasksChanged();
+      await deps.onTasksChanged();
       break;
     }
 

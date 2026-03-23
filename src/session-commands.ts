@@ -35,7 +35,7 @@ export interface SessionCommandDeps {
     onOutput: (result: AgentResult) => Promise<void>,
   ) => Promise<"success" | "error">;
   closeStdin: () => void;
-  advanceCursor: (timestamp: string) => void;
+  advanceCursor: (ts: string, id: string) => Promise<void>;
   formatMessages: (msgs: NewMessage[], timezone: string) => string;
   /** Whether the denied sender would normally be allowed to interact (for denial messages). */
   canSenderInteract: (msg: NewMessage) => boolean;
@@ -78,7 +78,7 @@ export async function handleSessionCommand(opts: {
     if (deps.canSenderInteract(cmdMsg)) {
       await deps.sendMessage("Session commands require admin access.");
     }
-    deps.advanceCursor(cmdMsg.timestamp);
+    await deps.advanceCursor(cmdMsg.timestamp, cmdMsg.id);
     return { handled: true, success: true };
   }
 
@@ -114,7 +114,8 @@ export async function handleSessionCommand(opts: {
       if (preOutputSent) {
         // Output was already sent — don't retry or it will duplicate.
         // Advance cursor past pre-compact messages, leave command pending.
-        deps.advanceCursor(preCompactMsgs[preCompactMsgs.length - 1].timestamp);
+        const lastPre = preCompactMsgs[preCompactMsgs.length - 1];
+        await deps.advanceCursor(lastPre.timestamp, lastPre.id);
         return { handled: true, success: true };
       }
       return { handled: true, success: false };
@@ -124,19 +125,22 @@ export async function handleSessionCommand(opts: {
   // Forward the literal slash command as the prompt (no XML formatting)
   await deps.setTyping(true);
 
-  let hadCmdError = false;
-  const cmdOutput = await deps.runAgent(command, async (result) => {
-    if (result.status === "error") hadCmdError = true;
-    const text = resultToText(result.result);
-    if (text) await deps.sendMessage(text);
-  });
+  try {
+    let hadCmdError = false;
+    const cmdOutput = await deps.runAgent(command, async (result) => {
+      if (result.status === "error") hadCmdError = true;
+      const text = resultToText(result.result);
+      if (text) await deps.sendMessage(text);
+    });
 
-  // Advance cursor to the command — messages AFTER it remain pending for next poll.
-  deps.advanceCursor(cmdMsg.timestamp);
-  await deps.setTyping(false);
+    // Advance cursor to the command — messages AFTER it remain pending for next poll.
+    await deps.advanceCursor(cmdMsg.timestamp, cmdMsg.id);
 
-  if (cmdOutput === "error" || hadCmdError) {
-    await deps.sendMessage(`${command} failed. The session is unchanged.`);
+    if (cmdOutput === "error" || hadCmdError) {
+      await deps.sendMessage(`${command} failed. The session is unchanged.`);
+    }
+  } finally {
+    await deps.setTyping(false);
   }
 
   return { handled: true, success: true };

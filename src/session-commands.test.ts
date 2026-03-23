@@ -75,7 +75,7 @@ function makeDeps(overrides: Partial<SessionCommandDeps> = {}): SessionCommandDe
     setTyping: vi.fn().mockResolvedValue(undefined),
     runAgent: vi.fn().mockResolvedValue("success"),
     closeStdin: vi.fn(),
-    advanceCursor: vi.fn(),
+    advanceCursor: vi.fn().mockResolvedValue(undefined),
     formatMessages: vi.fn().mockReturnValue("<formatted>"),
     canSenderInteract: vi.fn().mockReturnValue(true),
     ...overrides,
@@ -110,7 +110,7 @@ describe("handleSessionCommand", () => {
     });
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
-    expect(deps.advanceCursor).toHaveBeenCalledWith("100");
+    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
   });
 
   it("sends denial to interactable sender in non-main group", async () => {
@@ -126,7 +126,7 @@ describe("handleSessionCommand", () => {
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).toHaveBeenCalledWith("Session commands require admin access.");
     expect(deps.runAgent).not.toHaveBeenCalled();
-    expect(deps.advanceCursor).toHaveBeenCalledWith("100");
+    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
   });
 
   it("silently consumes denied command when sender cannot interact", async () => {
@@ -141,7 +141,7 @@ describe("handleSessionCommand", () => {
     });
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).not.toHaveBeenCalled();
-    expect(deps.advanceCursor).toHaveBeenCalledWith("100");
+    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
   });
 
   it("processes pre-compact messages before /compact", async () => {
@@ -275,7 +275,7 @@ describe("handleSessionCommand", () => {
     expect(deps.sendMessage).toHaveBeenCalledWith("partial output");
     expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("Failed to process"));
     // Cursor advances to pre-compact msg timestamp, NOT the command timestamp
-    expect(deps.advanceCursor).toHaveBeenCalledWith("99");
+    expect(deps.advanceCursor).toHaveBeenCalledWith("99", "msg-1");
   });
 
   it("handles object results via JSON.stringify in resultToText", async () => {
@@ -295,5 +295,22 @@ describe("handleSessionCommand", () => {
     });
     expect(result).toEqual({ handled: true, success: true });
     expect(deps.sendMessage).toHaveBeenCalledWith('{"key":"value"}');
+  });
+
+  it("turns off typing even when runAgent throws", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockRejectedValue(new Error("crash")),
+    });
+    await expect(
+      handleSessionCommand({
+        missedMessages: [makeMsg("/compact")],
+        isMainGroup: true,
+        groupName: "test",
+        triggerPattern: trigger,
+        timezone: "UTC",
+        deps,
+      }),
+    ).rejects.toThrow("crash");
+    expect(deps.setTyping).toHaveBeenCalledWith(false);
   });
 });

@@ -25,11 +25,20 @@ import {
 // --- Helpers ---
 
 function createMockProcess(pid = 12345) {
+  const listeners = new Map<string, ((...args: any[]) => void)[]>();
   return {
     pid,
     unref: vi.fn(),
     kill: vi.fn(),
     stdin: { write: vi.fn(), end: vi.fn() },
+    on: vi.fn((event: string, cb: (...args: any[]) => void) => {
+      const list = listeners.get(event) ?? [];
+      list.push(cb);
+      listeners.set(event, list);
+    }),
+    _emit: (event: string, ...args: any[]) => {
+      for (const cb of listeners.get(event) ?? []) cb(...args);
+    },
   };
 }
 
@@ -236,6 +245,21 @@ describe("remote-control", () => {
         error: "Failed to start: ENOENT",
       });
     });
+
+    it("returns error when spawn emits async error event", async () => {
+      const proc = createMockProcess();
+      spawnMock.mockReturnValue(proc);
+      vi.spyOn(process, "kill").mockImplementation((() => true) as any);
+      stdoutFileContent = "";
+      const resultPromise = startRemoteControl("user1", "tg:123", "/project");
+      // Emit async spawn error (e.g. claude binary not found)
+      proc._emit("error", new Error("spawn claude ENOENT"));
+      const result = await resultPromise;
+      expect(result).toEqual({
+        ok: false,
+        error: "Failed to start: spawn claude ENOENT",
+      });
+    });
   });
 
   // --- stopRemoteControl ---
@@ -291,9 +315,14 @@ describe("remote-control", () => {
       expect(active!.url).toBe("https://claude.ai/code?bridge=env_restored");
       expect(active!.startedInChat).toBe("tg:123");
       expect(logSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ pid: 77777, url: "https://claude.ai/code?bridge=env_restored" }),
+        expect.objectContaining({ pid: 77777 }),
         "Restored Remote Control session from previous run",
       );
+      // URL should NOT be logged (it's a capability token)
+      const restoreCall = logSpy.mock.calls.find(
+        (c: any[]) => c[1] === "Restored Remote Control session from previous run",
+      );
+      expect(restoreCall![0]).not.toHaveProperty("url");
     });
 
     it("clears state if process is dead", () => {

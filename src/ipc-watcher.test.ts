@@ -38,7 +38,7 @@ function createDeps(overrides?: Partial<IpcDeps>): IpcDeps {
     syncGroups: vi.fn(async () => {}),
     getAvailableGroups: vi.fn(async () => []),
     writeGroupsSnapshot: vi.fn(),
-    onTasksChanged: vi.fn(),
+    onTasksChanged: vi.fn(async () => {}),
     ...overrides,
   };
 }

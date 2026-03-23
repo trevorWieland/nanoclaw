@@ -232,9 +232,9 @@ export function createGroupProcessor(
         setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
         runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
         closeStdin: () => deps.queue.closeStdin(chatJid),
-        advanceCursor: (ts) => {
-          deps.setLastAgentTimestamp(chatJid, { ts, id: "" });
-          deps.saveState();
+        advanceCursor: async (ts, id) => {
+          deps.setLastAgentTimestamp(chatJid, { ts, id });
+          await deps.saveState();
         },
         formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
         canSenderInteract: (msg) => {
@@ -249,7 +249,14 @@ export function createGroupProcessor(
         },
       },
     });
-    if (cmdResult.handled) return cmdResult.success;
+    if (cmdResult.handled) {
+      // Session command consumed the batch. Clean up any pending tail-drain
+      // so the message-loop poll guard doesn't block this group.
+      if (pendingTailDrain.delete(chatJid)) {
+        await deps.savePendingTailDrain();
+      }
+      return cmdResult.success;
+    }
     // --- End session command interception ---
 
     // Whether the trigger window was truncated (tail messages still need processing).

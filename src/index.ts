@@ -265,8 +265,11 @@ async function main(): Promise<void> {
     msg: NewMessage,
   ): Promise<void> {
     const group = registeredGroups[chatJid];
-    if (!group?.isMain) {
-      logger.warn({ chatJid, sender: msg.sender }, "Remote control rejected: not main group");
+    if (!group?.isMain || !msg.is_from_me) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        "Remote control rejected: not main group or not admin",
+      );
       return;
     }
 
@@ -293,16 +296,7 @@ async function main(): Promise<void> {
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: async (chatJid: string, msg: NewMessage) => {
-      // Remote control commands — intercept before storage
-      const trimmed = msg.content.trim();
-      if (trimmed === "/remote-control" || trimmed === "/remote-control-end") {
-        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
-          logger.error({ err, chatJid }, "Remote control command error"),
-        );
-        return;
-      }
-
-      // Sender allowlist drop mode: discard messages from denied senders before storing
+      // Sender allowlist drop mode: discard messages from denied senders before any processing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
         if (shouldDropMessage(chatJid, cfg) && !isSenderAllowed(chatJid, msg.sender, cfg)) {
@@ -315,6 +309,16 @@ async function main(): Promise<void> {
           return;
         }
       }
+
+      // Remote control commands — intercept before storage
+      const trimmed = msg.content.trim();
+      if (trimmed === "/remote-control" || trimmed === "/remote-control-end") {
+        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, "Remote control command error"),
+        );
+        return;
+      }
+
       await storeMessage(msg);
     },
     onChatMetadata: async (
@@ -446,18 +450,22 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     onTasksChanged: async () => {
-      const tasks = await getAllTasks();
-      const taskRows = tasks.map((t) => ({
-        id: t.id,
-        groupFolder: t.group_folder,
-        prompt: t.prompt,
-        schedule_type: t.schedule_type,
-        schedule_value: t.schedule_value,
-        status: t.status,
-        next_run: t.next_run,
-      }));
-      for (const group of Object.values(registeredGroups)) {
-        writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+      try {
+        const tasks = await getAllTasks();
+        const taskRows = tasks.map((t) => ({
+          id: t.id,
+          groupFolder: t.group_folder,
+          prompt: t.prompt,
+          schedule_type: t.schedule_type,
+          schedule_value: t.schedule_value,
+          status: t.status,
+          next_run: t.next_run,
+        }));
+        for (const group of Object.values(registeredGroups)) {
+          writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+        }
+      } catch (err) {
+        logger.error({ err }, "Failed to update task snapshots");
       }
     },
   });

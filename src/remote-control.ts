@@ -60,10 +60,7 @@ export function restoreRemoteControl(): void {
     const session: RemoteControlSession = JSON.parse(data);
     if (session.pid && isProcessAlive(session.pid)) {
       activeSession = session;
-      logger.info(
-        { pid: session.pid, url: session.url },
-        "Restored Remote Control session from previous run",
-      );
+      logger.info({ pid: session.pid }, "Restored Remote Control session from previous run");
     } else {
       clearState();
     }
@@ -133,6 +130,14 @@ export async function startRemoteControl(
   // Fully detach from parent
   proc.unref();
 
+  // Listen for async spawn errors (e.g. ENOENT when claude is not on PATH).
+  // spawn() itself only throws synchronously for invalid arguments; missing
+  // binaries emit an 'error' event on the ChildProcess.
+  let spawnError: Error | null = null;
+  proc.on("error", (err: Error) => {
+    spawnError = err;
+  });
+
   const pid = proc.pid;
   if (!pid) {
     return { ok: false, error: "Failed to get process PID" };
@@ -143,6 +148,12 @@ export async function startRemoteControl(
     const startTime = Date.now();
 
     const poll = () => {
+      // Check for async spawn failure
+      if (spawnError) {
+        resolve({ ok: false, error: `Failed to start: ${spawnError.message}` });
+        return;
+      }
+
       // Check if process died
       if (!isProcessAlive(pid)) {
         resolve({ ok: false, error: "Process exited before producing URL" });
@@ -169,7 +180,7 @@ export async function startRemoteControl(
         activeSession = session;
         saveState(session);
 
-        logger.info({ url: match[0], pid, sender, chatJid }, "Remote Control session started");
+        logger.info({ pid, sender, chatJid }, "Remote Control session started");
         resolve({ ok: true, url: match[0] });
         return;
       }
