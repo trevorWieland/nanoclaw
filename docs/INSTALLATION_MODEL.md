@@ -91,7 +91,7 @@ See [SECURITY.md](./SECURITY.md) and [SPEC.md](./SPEC.md#claude-authentication).
 
 - **Household/friends chat**: only the assistant runtime needs provider credentials; participants just message the channel.
 - **Developer team workflows**: each developer typically runs their own instance today for credential separation.
-- **Centralized shared-credential models** are tracked as future work in [ROADMAP.md](../ROADMAP.md).
+- **Centralized shared-credential models** are tracked as future work in [GitHub Issues](https://github.com/trevorWieland/nanoclaw/issues).
 
 ## External Worker Orchestration Pattern
 
@@ -110,4 +110,3 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md#6-code-orchestration-supervisor).
 - [SPEC.md](./SPEC.md)
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
 - [SECURITY.md](./SECURITY.md)
-- [ROADMAP.md](../ROADMAP.md)

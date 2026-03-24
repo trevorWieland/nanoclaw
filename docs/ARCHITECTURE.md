@@ -1,472 +1,352 @@
-# NanoClaw — Multi-Arm Assistant Architecture
+# NanoClaw Architecture
 
-> **Fork-specific note:** This document is an operating model for `trevorWieland/nanoclaw`. It builds on core NanoClaw primitives from `docs/SPEC.md` and may include personal workflow choices not required by upstream `qwibitai/nanoclaw`.
+> **Fork-specific note:** This documents `trevorWieland/nanoclaw`, which adds Postgres backend support, Docker-out-of-Docker container deployment, health monitoring, Tanren VM integration, auth circuit breaker, message deduplication, and modernized tooling (pnpm, oxfmt, oxlint, turbo, knip) over upstream `qwibitai/nanoclaw`.
 
-## Vision
-
-A personal AI infrastructure that operates across multiple domains — software
-development, creative projects, daily life coordination — through a single
-unified identity. One agent with many arms, powered by a single NanoClaw
-instance accessible over messaging channels (Discord, WhatsApp, etc.).
-
-The system compounds over time: development work improves tools, tool
-improvements enable better workflows, accumulated knowledge makes everything
-faster and more reliable.
+See [SPEC.md](SPEC.md) for implementation-level details. See [SECURITY.md](SECURITY.md) for the trust model and threat mitigations.
 
 ---
 
-## 1. Agent Identity: One Agent, Many Arms
+## 1. Overview
 
-The system should feel like a single intelligent assistant that happens to be
-capable of many things. When you switch topics — from code to meals to project
-planning — it should feel like the same entity shifting focus.
-
-### Identity architecture
-
-NanoClaw's `groups/global/CLAUDE.md` is mounted read-only into every container.
-This is where the unified identity lives. Each group's local CLAUDE.md adds
-only task-specific capabilities and data — not a separate personality.
-
-```
-groups/
-├── global/
-│   ├── CLAUDE.md              <- Shared identity (read by ALL groups)
-│   ├── knowledge/             <- Shared knowledge files
-│   │   ├── decisions.md       <- Major decisions and reasoning
-│   │   ├── ideas-backlog.md   <- Ideas mentioned but not acted on
-│   │   └── contacts.md        <- People and context
-│   └── calendar.json          <- Sanitized schedule for all arms
-├── main/
-│   └── CLAUDE.md              <- Coordinator capabilities
-├── domain_a/
-│   └── CLAUDE.md              <- Domain A capabilities only
-├── domain_b/
-│   └── CLAUDE.md              <- Domain B capabilities only
-└── shared_social/
-    └── CLAUDE.md              <- Social mode constraints only
-```
-
-### Global CLAUDE.md — the soul
-
-Defines core identity, communication style, knowledge about users,
-cross-context awareness rules, and a periodically-updated summary of active
-work across all domains. Key principles:
-
-- Same voice everywhere: casual, competent, slightly dry
-- Direct and efficient, no filler
-- Proactive but not presumptuous
-- Never shares information across domain boundaries
-
-### Information isolation rules (strict)
-
-**On the private server** (with the owner only): the agent can reference any
-domain freely. Full cross-context awareness.
-
-**On shared servers** (with other people): the agent has ZERO awareness of the
-private server. It does not reference work from other domains — even vaguely.
-As far as anyone on the shared server knows, the agent only does whatever that
-server is for. Enforced at the CLAUDE.md level per group:
-
-```markdown
-## Absolute Boundaries
-
-You have NO knowledge of any activity on the private server. You do not know
-about: code projects, other domains, or any private activity. If asked, you
-genuinely do not have access to that information from this context.
-```
-
-### Group CLAUDE.md files
-
-Define what each arm CAN DO, not who it IS. Identity comes from global.
-Capabilities come from local. The agent is the same entity everywhere, just
-with different tools and data available per context — and strict isolation
-rules about what it acknowledges per server.
+NanoClaw is a personal AI assistant that runs Claude agents inside Docker containers. A single Node.js process (the host orchestrator) manages messaging channels, a database, a task scheduler, and a container execution pipeline. Messages arrive from channels (Discord, WhatsApp, Telegram, Slack, Gmail), get stored in the database, and trigger container-isolated Claude Agent SDK sessions. Each messaging group gets its own filesystem, session state, and IPC namespace.
 
 ---
 
-## 2. Foundation: Container-Based Isolation on Linux/WSL2
+## 2. System Architecture
 
-NanoClaw runs on a Linux host (native or WSL2). Each agent group gets its own
-Docker container with isolated filesystem, memory, and IPC namespace.
+```mermaid
+graph TB
+    subgraph Channels
+        Discord["Discord (built-in)"]
+        WhatsApp["WhatsApp (skill branch)"]
+        Telegram["Telegram (skill branch)"]
+        Slack["Slack (skill branch)"]
+        Gmail["Gmail (skill branch)"]
+    end
 
-> **Fork-specific note:** The Linux/WSL2-first framing and process-manager preferences below describe this fork's deployment style, not a mandatory upstream requirement.
+    subgraph Host["Host Orchestrator (src/index.ts)"]
+        Registry["Channel Registry"]
+        DB["Database Layer<br/>(DataStore interface)"]
+        ML["Message Loop<br/>(polls DB every 2s)"]
+        TS["Task Scheduler<br/>(cron/interval/once)"]
+        GQ["Group Queue<br/>(per-group state machine,<br/>concurrency control)"]
+        CR["Container Runner<br/>(mount orchestration,<br/>Docker spawn)"]
+        IPC["IPC Watcher<br/>(file-based, Zod-validated)"]
+        CP["Credential Proxy<br/>(HTTP, injects auth)"]
+        HM["Health Monitor<br/>(extensible sources)"]
+        SS["Status Server<br/>(HTTP endpoint)"]
+        RC["Remote Control<br/>(Claude Code editor)"]
+    end
 
-### Key infrastructure choices
+    subgraph Storage
+        SQLite["SQLite<br/>(better-sqlite3)"]
+        Postgres["Postgres<br/>(postgres npm driver)"]
+    end
 
-- **Docker Engine** natively in WSL2 (not Docker Desktop) for stability
-- **Process manager** (pm2 or systemd) for auto-restart and logging
-- **Resource budgeting** — allocate CPU/RAM per container type, leave headroom
+    subgraph Container["Agent Container (Docker)"]
+        AR["Agent Runner<br/>(Claude Agent SDK)"]
+        IPCMCP["IPC MCP Server"]
+        TanrenMCP["Tanren MCP Server"]
+    end
 
----
-
-## 3. Multi-Channel Pattern
-
-One bot identity across multiple messaging channels and servers. The agent
-uses the same name everywhere, with strict information isolation between
-contexts.
-
-### Private server channels (example)
-
-```
-#command-center    ->  Coordinator (main group)
-                      All human interaction for dev workflows.
-                      Trigger: @Agent
-
-#architect         ->  Architect (non-main group)
-                      System evolution, infrastructure changes.
-                      Trigger: @Agent
-
-#domain-work       ->  Domain Supervisor (non-main group)
-                      Domain-specific pipeline status.
-```
-
-### Shared server channels (example)
-
-```
-#planning          ->  Domain Coordinator (non-main group)
-#feedback          ->  Post-activity feedback
-#preferences       ->  Members update preferences
-#general           ->  Social chat (separate sandboxed group)
-```
-
-### Group isolation
-
-Each channel maps to an isolated NanoClaw group with its own container,
-filesystem, CLAUDE.md, session persistence, and IPC namespace. Groups cannot
-cross-communicate without coordinator mediation.
-
----
-
-## 4. Memory Hierarchy & Information Flow
-
-### Three tiers
-
-**Tier 1: Global memory** (`groups/global/`)
-
-- Shared identity, communication style, knowledge about users
-- Cross-context status summaries (sanitized)
-- Calendar/schedule awareness
-- Updated by coordinator only
-
-**Tier 2: Domain memory** (each group's folder)
-
-- Task-specific capabilities, instructions, and accumulated knowledge
-- Active state (workflows, current plans, progress)
-- Updated by each group's container during operation
-
-**Tier 3: Ephemeral context** (container session)
-
-- Current conversation, in-progress reasoning
-- Dies with the session, fresh start from Tier 1 + 2
-
-### Cross-domain information flow
-
-```
-Global Memory --reads--> All groups
-Coordinator --writes--> Global (updates summaries, calendar)
-Coordinator --reads--> All group folders (main group privileges)
-Group A --CANNOT read--> Group B's folder
-Group A --CANNOT write--> Global (read-only mount)
-```
-
-The coordinator mediates all cross-domain information:
-
-```
-Domain A -> Domain B:  "Bug found in shared tool" -> Coordinator files issue
-Domain B -> Global:    "v0.2.3 merged" -> Coordinator updates status
-Shared -> Global:      "User preference changed" -> Coordinator updates if confirmed
+    Discord --> Registry
+    WhatsApp --> Registry
+    Telegram --> Registry
+    Slack --> Registry
+    Gmail --> Registry
+    Registry --> DB
+    DB --> SQLite
+    DB --> Postgres
+    ML --> DB
+    ML --> GQ
+    TS --> GQ
+    GQ --> CR
+    CR --> Container
+    IPC <--> Container
+    CP --> Container
+    HM --> SS
+    RC --> Host
+    AR --> IPCMCP
+    AR --> TanrenMCP
 ```
 
 ---
 
-## 5. Calendar Integration
+## 3. Host Orchestrator
 
-### Setup
+`src/index.ts` is the composition root. On startup it:
 
-Google Calendar as the primary, subscribing to other calendar sources
-(work calendar via ICS feed, phone sync). One unified calendar the agent
-reads via Google Calendar API/MCP.
+1. Ensures the container runtime (Docker) is running and cleans up orphaned containers from previous runs (labeled with `INSTANCE_ID`).
+2. Initializes the database via the DataStore factory.
+3. Loads persisted state: last-processed timestamps, sessions, registered groups, pending tail-drain cursors.
+4. Syncs project metadata (CLAUDE.md, docs/, skills/) to a read-only mount directory.
+5. Restores any active remote control session from disk.
+6. Applies declarative group registrations (from `registered-groups.json` for container deployments).
+7. Starts the credential proxy (containers route all API traffic through it).
+8. Starts the status server for external dashboards.
+9. Connects all registered channels (factory pattern; unconfigured channels are skipped).
+10. Starts the health monitor with configured sources.
+11. Wires up the group processor with injected dependencies and starts: task scheduler, IPC watcher, message recovery, and the message polling loop.
 
-> **Fork-specific note:** This calendar strategy is an implementation choice for this fork's personal assistant workflow.
-
-### Access model
-
-The coordinator gets full read access: event titles, descriptions, attendees,
-locations, times. This enables:
-
-- Don't ping during meetings or focus blocks
-- Batch non-urgent updates for after busy periods
-- Automatically adjust behavior around travel
-- Calendar-aware notification timing
-
-### Information sharing
-
-The coordinator writes a sanitized daily schedule to global memory. Other arms
-see "user is busy until 3 PM" — not meeting details.
+Graceful shutdown (`SIGTERM`/`SIGINT`) closes the proxy, status server, drains the group queue, and disconnects channels.
 
 ---
 
-## 6. Code Orchestration Supervisor
+## 4. Database Layer
 
-### Purpose
+The database stores chat metadata, messages, scheduled tasks, router state, sessions, and registered groups.
 
-Manage software development workflows for any GitHub project. Follows a
-structured pipeline: shape spec -> implement -> audit -> demo -> walk -> PR.
+**DataStore interface** (`src/datastore/types.ts`): defines all database operations. Both adapters implement the same interface, so the rest of the codebase is storage-agnostic.
 
-> **Fork-specific note:** The orchestration pipeline and worker-manager split here are fork-local operating conventions layered on top of the base NanoClaw runtime.
+**Factory** (`src/datastore/factory.ts`): the `DB_BACKEND` environment variable (`"sqlite"` or `"postgres"`) selects which adapter is instantiated at startup.
 
-### Components
+**SQLite adapter** (default): uses `better-sqlite3`. Database file lives at `DATA_DIR/store/messages.db` (or the path specified in `DATABASE_URL`). Schema is created inline on first run.
 
-**Coordinator container** (persistent, main group)
-
-- All interactive phases (spec shaping, walkthrough) over messaging
-- Workflow state management across all projects
-- Dispatches autonomous work via IPC to worker manager
-- Calendar-aware timing of notifications and requests
-
-**Worker manager** (host-level service, not a NanoClaw group)
-
-- Watches for dispatch files from coordinator's IPC directory
-- Spawns the correct CLI per phase (different tools for implementation vs. audit)
-- Manages git worktrees for parallel issue work
-- Extracts completion signals from status files
-- Writes results back to coordinator IPC
-- Enforces per-subscription rate limits and concurrency caps
-
-**IPC file contract** (operating convention)
-
-- **Dispatch files**: coordinator -> worker manager (new work)
-- **Result files**: worker manager -> coordinator (final outcome)
-- **Nudge files**: worker manager -> coordinator (result ready signal)
-- **Heartbeat files**: worker manager -> coordinator (liveness/progress)
-
-**Workflow monitor** (NanoClaw scheduled task, 60s cron)
-
-- Checks worker status files for completed phases
-- Advances workflow state machines
-- Dispatches next phases
-- Detects staleness and timeouts
-- Reports significant events to messaging (calendar-aware timing)
-
-### Workflow state machine
-
-```
-idle -> shaping -> await_confirm -> orchestrating -> walking -> pr_review -> completed
-                                        |                        |
-                                        |  (walk finds issues)   |
-                                        +------------------------+
-```
-
-Each state persisted in `workflows.json`. Survives container restarts.
-
-### Parallel execution
-
-Git worktrees provide branch isolation per issue. Multiple parallel workers
-can run on different issues using different tool subscriptions, avoiding rate
-limit conflicts.
-
-### Interactive phases
-
-Spec shaping and walkthrough run inside the coordinator container. The
-coordinator reads the command file, follows the steps, uses messaging for Q&A.
-User replies pipe through NanoClaw's message loop.
-
-Walkthrough continues through all demo steps on failure (doesn't stop at the
-first broken step) so you get the full picture before deciding how to proceed.
+**Postgres adapter**: uses the `postgres` npm driver. Requires `DATABASE_URL` to be a Postgres connection string. Runs migrations on startup.
 
 ---
 
-### Tanren Integration (optional)
+## 5. Channel System
 
-NanoClaw dispatches coding phases to the tanren HTTP API for execution on
-provisioned VMs. Configuration: set `TANREN_API_URL` and `TANREN_API_KEY`
-in `.env`. The orchestrator runs a health check at startup (non-blocking).
+Channels are the messaging interfaces through which users interact with the agent.
 
-Main group containers receive 13 tanren MCP tools (dispatch, VM management,
-run lifecycle, events) registered as a separate MCP server process. Non-main
-groups never have access to tanren tools.
+**Registry pattern** (`src/channels/registry.ts`): channels self-register by calling `registerChannel(name, factory)` at import time. The barrel file `src/channels/index.ts` imports all installed channel modules, triggering registration.
 
-The container's tanren implementation is intentionally minimal: raw fetch
-calls with no retry logic. The host-side `TanrenClient` (src/tanren/) has
-full retry/backoff for orchestrator use.
+**Discord** (`src/channels/discord.ts`): the only channel built into the core codebase.
 
----
+**Other channels** (WhatsApp, Telegram, Slack, Gmail): installed via skill branches that are merged into the user's fork. Each branch adds a channel module that calls `registerChannel()`.
 
-## 7. Domain-Specific Pipeline Arms
+**Channel interface**: each channel implements `connect()`, `disconnect()`, `sendMessage()`, `ownsJid()`, `isConnected()`, and `getChats()`. Optional methods include `purge()`, `start()`, `syncGroups()`, and `sendEmbed()`.
 
-NanoClaw's group architecture naturally supports domain-specific processing
-pipelines. Each domain gets its own group with specialized CLAUDE.md,
-knowledge base, and tooling.
-
-### Pattern
-
-```
-User: "Process item X"
-
-Domain Agent:
-  Lookup metadata -> validate -> extract/transform -> process
-  "Processing complete. Results ready."
-
-Coordinator: Routes to next step or requests approval
-
-Domain Agent: Post-processing, packaging, delivery
-
-User: Review, provide feedback
-
-Coordinator: Routes feedback to appropriate sub-step
-```
-
-### Container lifecycle
-
-Fresh session per work item. No context bleed. But the group folder persists
-(knowledge base, project directories, CLAUDE.md memories), so institutional
-knowledge accumulates across sessions.
+At startup, the orchestrator iterates registered channel names, calls each factory, and connects. Factories return `null` when credentials are missing, so unconfigured channels are silently skipped.
 
 ---
 
-## 8. Agent Group Summary
+## 6. Container Execution
 
-### Coordinator (private server, main group)
+### Container Runner (`src/container-runner.ts`)
 
-**Container:** Persistent, main group
-**Responsibilities:** All human interaction, interactive workflows, state
-management, dispatch to workers, cross-domain mediation, daily briefings,
-digest mode, calendar-aware notification timing
+Orchestrates the full lifecycle of an agent container:
 
-### Architect (private server, non-main)
+1. Creates the group directory if needed.
+2. Builds volume mounts (group files, global memory, IPC, sessions, skills, agent-runner source, additional mounts from allowlist).
+3. Generates Docker CLI arguments (resource limits, networking, environment variables, timezone).
+4. Spawns the container process via `docker run -i --rm`.
+5. Writes `ContainerInput` JSON to the container's stdin.
+6. Parses streaming output delimited by sentinel markers (`---NANOCLAW_OUTPUT_START---` / `---NANOCLAW_OUTPUT_END---`).
+7. Tracks auth errors in the circuit breaker.
+8. Writes container logs to `DATA_DIR/logs/<group>/`.
 
-**Container:** Non-main
-**Responsibilities:** System evolution — NanoClaw modifications, agent design,
-infrastructure changes. The meta-agent that understands the full system
-architecture and can modify it. All infrastructure code changes go through
-security audit before merging.
+### Container Runtime (`src/container-runtime.ts`)
 
-### Domain Arms (private server, non-main)
+Abstracts Docker-specific logic:
 
-**Container:** Fresh per work item, non-main
-**Responsibilities:** Domain-specific processing pipelines. Group folder
-persists across sessions for knowledge accumulation.
+- Binary name, host gateway hostname, proxy bind address detection.
+- Docker-out-of-Docker support: when the host NanoClaw itself runs in Docker, `CONTAINER_HOST_CONFIG_DIR` and `CONTAINER_HOST_DATA_DIR` translate container-internal paths to host-side paths for Docker `-v` sources.
+- Orphan cleanup: finds containers labeled `nanoclaw.instance=<INSTANCE_ID>` and stops them.
 
-### Shared Arms (shared servers, non-main)
+### Mount Orchestration
 
-**Container:** Non-main, trigger required, heavily sandboxed
-**Responsibilities:** Shared activities (meal planning, social, accountability).
-Zero awareness of private server activity. Same voice, limited capabilities.
+| Mount             | Container Path         | Access       | Purpose                                |
+| ----------------- | ---------------------- | ------------ | -------------------------------------- |
+| Group folder      | `/workspace/group`     | rw           | Group-specific files, CLAUDE.md        |
+| Global memory     | `/workspace/global`    | ro           | Shared identity (non-main only)        |
+| All groups        | `/workspace/groups`    | ro           | Cross-group visibility (main only)     |
+| Project meta      | `/workspace/project`   | ro           | Synced docs/skills (main only)         |
+| IPC namespace     | `/workspace/ipc`       | rw           | Messages, tasks, input, close sentinel |
+| Claude sessions   | `/home/node/.claude`   | rw           | Session persistence, settings, skills  |
+| Agent runner src  | `/app/src`             | rw           | Customizable agent-runner source       |
+| uv cache          | `/home/node/.cache/uv` | rw           | Persistent Python package cache        |
+| Additional mounts | (per config)           | (per config) | Validated against mount allowlist      |
 
-### Worker Manager (host-level, not a NanoClaw group)
+### Resource Limits
 
-**Process:** Standalone service alongside NanoClaw
-**Responsibilities:** Dispatch coding workers, manage git worktrees, extract
-signals, route to correct CLI/subscription, enforce concurrency and rate limits
-
----
-
-## 9. Infrastructure Security
-
-### Mandatory security audit for infrastructure changes
-
-Any code change to the following components should receive a security audit
-before being applied:
-
-- NanoClaw fork (container-runner, IPC, channels, auth, MCP tools)
-- Worker manager (process spawning, credential handling)
-- Browser automation (credential storage, session management)
-- Any framework touching permissions or file access
-- Global/group CLAUDE.md changes that affect capabilities
-- Any new NanoClaw skill or MCP tool
-
-### Audit focus areas
-
-- Credential leaks (API keys, OAuth tokens exposed to containers or logs)
-- IPC privilege escalation (non-main group writing files that main group executes)
-- Container escape vectors (mounts that expose host filesystem beyond intended scope)
-- Injection via external input (webhook payloads, messages, issue content used unsafely)
-- Path traversal in group folder or worktree management
-- Secret exposure in error messages, logs, or status reports
-
-### Audit flow
-
-```
-Change proposed
-    |
-    v
-Code written to a branch (not main)
-    |
-    v
-Security audit dispatched (automated or manual)
-    |
-    v
-Audit reports findings
-    |
-    +-- Clean -> Owner approves -> merge
-    |
-    +-- Issues found -> address -> re-audit -> repeat
-```
-
-No infrastructure code lands on main without passing a security audit.
+- `CONTAINER_MEMORY_LIMIT` (default `"4g"`), per-group override via `containerConfig.memoryLimit`
+- `CONTAINER_CPU_LIMIT` (default `"2"`), per-group override via `containerConfig.cpuLimit`
+- Exit code 137 (SIGKILL) with memory limits set triggers an OOM warning
 
 ---
 
-## 10. Operational Resilience Overlays
+## 7. Agent Runner (Container-Side)
 
-These are fork-level reliability controls for 24/7 operation:
+The agent runner is a separate npm package at `container/agent-runner/`. It runs inside each container.
 
-- **Auth circuit breaker**: suppresses retry storms after repeated auth failures, then auto-resets after cooldown.
-- **Task auto-pause on auth errors**: pauses failing scheduled tasks and emits a single operator-facing notification.
-- **Duplicate error suppression**: fingerprint-based dedup prevents repeated high-volume error spam.
-- **Long-lived token preference**: prefers setup-token credentials before short-lived login credentials.
-- **Admin operator commands**: guarded maintenance commands (`!restart`, `!purge`) on supported channels.
+**Entry** (`container/agent-runner/src/index.ts`): reads `ContainerInput` JSON from stdin, configures the Claude Agent SDK, and calls `query()`.
 
-Implementation details belong in `docs/SPEC.md`; this section documents the operating intent.
+**IPC polling loop**: after the initial query, the runner watches `/workspace/ipc/input/` for follow-up message files. Each file contains `{type:"message", text:"..."}`. The sentinel file `/workspace/ipc/input/_close` signals the session should end.
 
----
+**MCP servers**: two optional MCP servers run as child processes:
 
-## 11. Supporting Features
+- **IPC MCP** (`ipc-mcp-stdio.ts`): exposes host communication tools (send messages, manage tasks, register groups).
+- **Tanren MCP** (`tanren-mcp-stdio.ts`): exposes VM provisioning and dispatch operations (main group only).
 
-All implemented as scheduled tasks or coordinator behaviors.
+**Session management**: resumes from an existing session ID if provided in `ContainerInput`. Stores the new session ID in the output for the host to persist.
 
-### Daily briefing (cron)
+**Workspace layout**:
 
-Coordinator synthesizes overnight activity across all domains into one message.
-Calendar-aware — delivered when you're available.
-
-### Digest mode (travel / busy days)
-
-When the calendar shows travel or busy periods, the agent switches to digest
-mode: one morning message per day summarizing the last 24 hours. No further
-messages unless you reply. Triggered automatically by calendar events or
-manually.
-
-### Notification triage (periodic poll)
-
-Coordinator polls GitHub via `gh` CLI. Surfaces important items: CI failures,
-community issues, PR status. Presents with recommended actions.
-
-### Calendar-aware notification timing
-
-The coordinator adjusts all agent behavior based on calendar state:
-
-- Don't send interactive requests during meetings
-- Batch non-urgent updates for after focus blocks
-- Pause interactive work during travel (continue autonomous)
-- Adjust notification frequency based on availability
-- Trigger digest mode automatically during vacations
+- `/workspace/group` -- group-specific working directory
+- `/workspace/global` -- shared identity (read-only for non-main)
+- `/workspace/ipc` -- IPC namespace (messages/, tasks/, input/)
+- `/workspace/extra` -- additional mounts from allowlist
 
 ---
 
-## 12. Technology Stack
+## 8. IPC System
 
-```
-Layer              Technology           Purpose
-------------------------------------------------------------------
-Messaging          Discord.js / etc.    Agent <-> channel communication
-Host runtime       Node.js (NanoClaw)   Message routing, scheduling, IPC
-Process manager    pm2 / systemd        Auto-restart, logging
-Container runtime  Docker (WSL2)        Agent sandboxing
-Agent SDK          Anthropic Agent SDK  Claude Code inside containers
-Database           SQLite               Messages, sessions, tasks, state
-Dev lifecycle      Structured pipeline  Shape -> implement -> audit -> walk
-Browser automation Playwright           Web automation tasks
-Calendar           Google Calendar API  Schedule awareness (via MCP)
-VCS                Git + GitHub         Code hosting, issues, releases
-```
+IPC between host and containers is file-based. All schemas are defined in `src/ipc-schemas.ts` using Zod.
+
+### Container-to-Host
+
+Containers write JSON files to their IPC namespace directories:
+
+- **Messages** (`/workspace/ipc/messages/`): outbound messages to channels. Schema: `IpcMessageSchema` (type, chatJid, text, optional sender).
+- **Tasks** (`/workspace/ipc/tasks/`): task operations. Schema: `TaskIpcSchema` (discriminated union on `type`). Supported operations: `schedule_task`, `pause_task`, `resume_task`, `cancel_task`, `update_task`, `register_group`, `refresh_groups`.
+- **Stdout markers**: `ContainerOutputSchema` JSON wrapped in sentinel markers for streaming output.
+
+Container-to-host schemas use `.passthrough()` so containers can include metadata fields the host ignores.
+
+### Host-to-Container
+
+- **Follow-up messages** (`/workspace/ipc/input/`): JSON files with `{type:"message", text:"..."}`. Schema: `FollowUpMessageSchema`.
+- **Close sentinel** (`/workspace/ipc/input/_close`): signals the container to end its session.
+- **Stdin**: initial `ContainerInput` JSON. Schema: `ContainerInputSchema`.
+
+Host-to-container schemas use `.strict()` -- extra fields indicate a host bug.
+
+### Host-Side Processing
+
+The IPC watcher (`src/ipc.ts`) polls `DATA_DIR/ipc/` at 1-second intervals, scanning per-group IPC directories. Group identity is determined by directory name. IPC actions are authorized based on the source group's privileges (main vs non-main).
+
+---
+
+## 9. Credential Proxy
+
+The credential proxy (`src/credential-proxy.ts`) is an HTTP server that isolates API credentials from containers.
+
+**How it works**: containers set `ANTHROPIC_BASE_URL` to the proxy address. All API traffic routes through the proxy, which injects real credentials before forwarding to the upstream API (Anthropic or custom endpoint).
+
+**Two auth modes**:
+
+- **API key mode**: proxy injects `x-api-key` header on every request. Containers receive `ANTHROPIC_API_KEY=placeholder`.
+- **OAuth mode**: proxy injects the real OAuth `Bearer` token on the token exchange request. Containers receive `CLAUDE_CODE_OAUTH_TOKEN=placeholder`.
+
+**Token resolution order** (OAuth mode):
+
+1. `.env` `CLAUDE_CODE_OAUTH_TOKEN` (long-lived, from `claude setup-token`)
+2. `~/.claude/.credentials.json` (short-lived, from `/login`) -- auto-refreshed when expired via OAuth2 `refresh_token` grant
+
+**Port**: `CREDENTIAL_PROXY_PORT` (default 3001). Bind address is auto-detected: docker0 bridge IP on Linux, loopback on macOS/Docker Desktop, `0.0.0.0` when `CREDENTIAL_PROXY_EXTERNAL_URL` is set.
+
+Containers never receive real credentials.
+
+---
+
+## 10. Health Monitoring
+
+**Health Monitor** (`src/health-monitor.ts`): polls registered health sources at a configurable interval. Caches health status and recent events. Sends embed notifications to configured channels on state transitions (healthy/unhealthy).
+
+**Health Sources** (`src/health-sources/`): pluggable health check implementations. Each source implements `checkHealth()` and `fetchEvents()`. Currently includes:
+
+- `TanrenHealthSource`: checks Tanren API health and polls for VM events.
+
+**Health Embeds** (`src/health-embeds.ts`): formats health status, events, and monitor errors as structured embeds (Discord format) or plain text fallback.
+
+**Status Server** (`src/status-server.ts`): HTTP endpoint (default port 3002, bind address `STATUS_BIND_HOST`) returning a JSON snapshot of system state: queue status, connected channels, tasks, registered groups, health status, and recent events.
+
+---
+
+## 11. Tanren Integration
+
+Tanren is an optional VM provisioning service for dispatching coding work to remote VMs.
+
+**Host-side client** (`src/tanren/client.ts`): API client with retry/backoff logic. Created at startup if `TANREN_API_URL` and `TANREN_API_KEY` are set. Performs a non-blocking health check on startup.
+
+**Container-side MCP** (`container/agent-runner/src/tanren-mcp-stdio.ts`): exposes VM provisioning and dispatch operations as MCP tools. Only available to main group containers (tanren config is passed in `ContainerInput` only for main groups).
+
+**Error handling**: custom `TanrenAPIError` class. Container-side implementation is intentionally minimal (raw fetch, no retry) -- the host-side client handles retry/backoff for orchestrator use.
+
+---
+
+## 12. Operational Resilience
+
+**Auth Circuit Breaker** (`src/auth-circuit-breaker.ts`): tracks consecutive 401/403 failures from container exits. After repeated failures, blocks credential reads with backoff cooldown. Resets on successful container completion.
+
+**Message Dedup** (`src/message-dedup.ts`): SHA256 fingerprint of outbound messages prevents duplicate sends within a time window.
+
+**Sender Allowlist** (`src/sender-allowlist.ts`): optional JSON config at `CONFIG_ROOT/sender-allowlist.json` restricts who can trigger `@mention` interactions. Supports per-chat and default rules, with a drop mode that discards messages from denied senders before processing.
+
+**Recovery** (`src/recovery.ts`): on startup, scans for messages that arrived while the process was down and re-enqueues them for processing.
+
+**Group Queue** (`src/group-queue.ts`): per-group state machine managing container concurrency.
+
+- States: idle, pending, active, idle-waiting, error, retry
+- Global concurrency limit: `MAX_CONCURRENT_CONTAINERS` (default 5)
+- Retry with exponential backoff (base 5s, max 5 retries)
+- Follow-up messages delivered to running containers via IPC stdin
+- Close sentinel sent when idle timeout expires
+- Tracks active process, container name, and group folder per group
+
+---
+
+## 13. Configuration
+
+### Three-Root Model
+
+All paths are env-configurable for containerized deployment. When unset, they collapse to `PROJECT_ROOT`-relative defaults.
+
+| Root          | Env Var                | Default               | Purpose                              |
+| ------------- | ---------------------- | --------------------- | ------------------------------------ |
+| `APP_DIR`     | `NANOCLAW_APP_DIR`     | `process.cwd()`       | Immutable application code           |
+| `CONFIG_ROOT` | `NANOCLAW_CONFIG_ROOT` | `process.cwd()`       | Groups, allowlists, `.env`           |
+| `DATA_DIR`    | `NANOCLAW_DATA_DIR`    | `<PROJECT_ROOT>/data` | Sessions, database, cache, IPC, logs |
+
+### Key Environment Variables
+
+| Variable                        | Default           | Purpose                                                  |
+| ------------------------------- | ----------------- | -------------------------------------------------------- |
+| `ASSISTANT_NAME`                | `"Andy"`          | Bot trigger name (`@Andy`)                               |
+| `DB_BACKEND`                    | `"sqlite"`        | Database adapter: `"sqlite"` or `"postgres"`             |
+| `DATABASE_URL`                  | (auto)            | SQLite file path or Postgres connection string           |
+| `CONTAINER_IMAGE`               | (required)        | Docker image for agent containers                        |
+| `CONTAINER_TIMEOUT`             | `1800000` (30m)   | Max container runtime (ms)                               |
+| `CONTAINER_MEMORY_LIMIT`        | `"4g"`            | Container memory limit                                   |
+| `CONTAINER_CPU_LIMIT`           | `"2"`             | Container CPU limit                                      |
+| `CONTAINER_MAX_OUTPUT_SIZE`     | `10485760` (10MB) | Max stdout/stderr capture per container                  |
+| `MAX_CONCURRENT_CONTAINERS`     | `5`               | Global container concurrency limit                       |
+| `CREDENTIAL_PROXY_PORT`         | `3001`            | Credential proxy listen port                             |
+| `STATUS_PORT`                   | `3002`            | Status server listen port                                |
+| `STATUS_BIND_HOST`              | `"127.0.0.1"`     | Status server bind address                               |
+| `POLL_INTERVAL`                 | `2000`            | Message polling interval (ms)                            |
+| `SCHEDULER_POLL_INTERVAL`       | `60000`           | Task scheduler check interval (ms)                       |
+| `IDLE_TIMEOUT`                  | `1800000` (30m)   | Container idle timeout after last output                 |
+| `TANREN_API_URL`                | (unset)           | Tanren API endpoint (enables integration)                |
+| `TANREN_API_KEY`                | (unset)           | Tanren API key                                           |
+| `AGENT_NETWORK`                 | (unset)           | Docker network for sibling container communication       |
+| `CONTAINER_HOST_CONFIG_DIR`     | (unset)           | Host-side CONFIG_ROOT path (Docker-out-of-Docker)        |
+| `CONTAINER_HOST_DATA_DIR`       | (unset)           | Host-side DATA_DIR path (Docker-out-of-Docker)           |
+| `CREDENTIAL_PROXY_EXTERNAL_URL` | (unset)           | Override proxy URL for containers (Docker-out-of-Docker) |
+
+---
+
+## 14. Remote Control
+
+Remote control (`src/remote-control.ts`) allows starting a Claude Code editor session from a messaging channel.
+
+- Triggered by `/remote-control` command in a main group chat.
+- Requires admin authorization: `is_from_me` or an explicit (non-wildcard) sender allowlist entry.
+- Spawns a `claude` process in the NanoClaw project directory, captures the session URL, and sends it back to the chat.
+- `/remote-control-end` stops the session.
+- Session state is persisted to `DATA_DIR/remote-control.json` and restored on restart.
+
+---
+
+## 15. Skills Architecture
+
+NanoClaw uses a git-branch-based skills system. See [skills-as-branches.md](skills-as-branches.md) for the full design.
+
+Four skill types:
+
+1. **Feature skills** -- git branches (e.g., `skill/add-telegram`) merged into the user's fork to add capabilities like new channels or integrations.
+2. **Utility skills** -- standalone tools shipped as a `SKILL.md` file plus supporting code. Invoked by the agent at runtime.
+3. **Operational skills** -- instruction-only workflows (e.g., `/setup`, `/debug`) that guide the agent through multi-step procedures. Always on `main`.
+4. **Container skills** -- loaded inside agent containers at runtime from `container/skills/`. Synced into each group's `.claude/skills/` directory before container launch.

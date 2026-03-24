@@ -122,8 +122,7 @@ grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
 # Check auth files exist
 ls -la store/auth/
 
-# Re-authenticate if needed
-pnpm run auth
+# Re-authenticate if needed — run /setup in Claude Code
 ```
 
 ## Service Management

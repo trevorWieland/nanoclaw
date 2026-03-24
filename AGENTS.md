@@ -12,7 +12,7 @@ Runtime/local state (`data/`, `store/`, `logs/`, `.nanoclaw/`) is not source cod
 
 ## Build, Test, and Development Commands
 
-- `pnpm install`: install dependencies (Node 20+, pnpm 10).
+- `pnpm install`: install dependencies (Node 24+, pnpm 10).
 - `pnpm run dev`: run NanoClaw directly from TypeScript (`tsx src/index.ts`).
 - `pnpm run build`: compile to `dist/` using `tsgo`.
 - `pnpm run start`: run the compiled build (`node dist/index.js`).
@@ -76,7 +76,4 @@ Use this source-of-truth order when making docs changes:
 - `docs/SECURITY.md`: trust model, boundaries, credential/mount controls
 - `docs/ARCHITECTURE.md`: operating patterns (coordinator, worker-manager, group model)
 - `docs/INSTALLATION_MODEL.md`: installation and private config layout
-- `ROADMAP.md`: future-state items only
-- `README.md`: short summaries + links to canonical docs
-
-When migrating or deleting a major doc, maintain `docs/HLD_MIGRATION_MAP.md` so removed content remains traceable.
+- `README.md`: overview, architecture diagrams, features
