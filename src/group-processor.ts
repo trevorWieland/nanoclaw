@@ -250,22 +250,20 @@ export function createGroupProcessor(
       },
     });
     if (cmdResult.handled) {
-      // Preserve any pending tail-drain entry — the re-enqueue below will
-      // force processGroupMessages via the queue (bypassing the poll guard),
-      // and the tail-drain cutoff is needed so remaining backlog messages
-      // skip trigger gating. Clearing it here would cause those messages to
-      // fall back to trigger requirements and potentially be skipped.
-
-      // If the command succeeded and there are messages after it in the batch,
-      // re-enqueue so they get processed. The global "seen" cursor already
-      // advanced past the entire batch, so getNewMessages won't return them.
-      // Only enqueue on success — on failure the queue's retry backoff handles
-      // re-processing, and an immediate enqueue would bypass that backoff.
+      // Re-enqueue on success when there are trailing messages or an active
+      // tail-drain. The global "seen" cursor already advanced past the batch,
+      // so getNewMessages won't return them again — the queue is the only way
+      // to pick up remaining work. Always re-enqueue when tail-drain is active
+      // because the poll guard (message-loop.ts:143) skips groups with pending
+      // tail-drain entries, so without a queue-driven run the group stalls.
+      // On failure, let the queue's retry backoff handle re-processing.
       if (cmdResult.success) {
+        const hasTailDrain = pendingTailDrain.has(chatJid);
         const cmdIdx = missedMessages.findIndex(
           (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
         );
-        if (cmdIdx >= 0 && cmdIdx < missedMessages.length - 1) {
+        const hasTrailingMessages = cmdIdx >= 0 && cmdIdx < missedMessages.length - 1;
+        if (hasTrailingMessages || hasTailDrain) {
           deps.queue.enqueueMessageCheck(chatJid);
         }
       }

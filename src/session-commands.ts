@@ -63,24 +63,25 @@ export async function handleSessionCommand(opts: {
 }): Promise<{ handled: false } | { handled: true; success: boolean }> {
   const { missedMessages, isMainGroup, groupName, triggerPattern, timezone, deps } = opts;
 
-  const cmdMsg = missedMessages.find(
-    (m) => extractSessionCommand(m.content, triggerPattern) !== null,
-  );
-  const command = cmdMsg ? extractSessionCommand(cmdMsg.content, triggerPattern) : null;
-
-  if (!command || !cmdMsg) return { handled: false };
-
-  if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true)) {
-    // DENIED: send denial but do NOT advance cursor — the cursor is a
-    // high-water mark, so advancing it would permanently skip any earlier
-    // messages in the same batch that haven't been processed yet.
-    // Return handled: false so processing falls through to the normal
-    // trigger path which handles the full batch correctly.
-    if (deps.canSenderInteract(cmdMsg)) {
+  // Find the first *authorized* session command, skipping denied ones.
+  // Send denial messages for unauthorized commands encountered along the way.
+  let cmdMsg: NewMessage | undefined;
+  let command: string | null = null;
+  for (const m of missedMessages) {
+    const cmd = extractSessionCommand(m.content, triggerPattern);
+    if (!cmd) continue;
+    if (isSessionCommandAllowed(isMainGroup, m.is_from_me === true)) {
+      cmdMsg = m;
+      command = cmd;
+      break;
+    }
+    // Denied — send denial but don't advance cursor or return handled
+    if (deps.canSenderInteract(m)) {
       await deps.sendMessage("Session commands require admin access.");
     }
-    return { handled: false };
   }
+
+  if (!command || !cmdMsg) return { handled: false };
 
   // AUTHORIZED: process pre-compact messages first, then run the command
   logger.info({ group: groupName, command }, "Session command");

@@ -146,6 +146,27 @@ describe("handleSessionCommand", () => {
     expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
+  it("skips unauthorized command and processes authorized one in same batch", async () => {
+    const deps = makeDeps();
+    const msgs = [
+      makeMsg("/compact", { id: "unauth", sender: "untrusted@test", is_from_me: false }),
+      makeMsg("/compact", { id: "auth", timestamp: "101", is_from_me: true }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: false,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    // Denial sent for first, then authorized command processed
+    expect(deps.sendMessage).toHaveBeenCalledWith("Session commands require admin access.");
+    expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
+    expect(deps.advanceCursor).toHaveBeenCalledWith("101", "auth");
+  });
+
   it("processes pre-compact messages before /compact", async () => {
     const deps = makeDeps();
     const msgs = [
