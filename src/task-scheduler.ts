@@ -68,6 +68,13 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  readTanrenConfig: () => { apiUrl: string; apiKey: string } | null | undefined;
+  readMcpServersConfig: (
+    groupFolder: string,
+    isMain: boolean,
+  ) =>
+    | Record<string, { type: "http" | "sse"; url: string; headers?: Record<string, string> }>
+    | undefined;
   runAgent: (
     group: RegisteredGroup,
     input: {
@@ -78,6 +85,11 @@ export interface SchedulerDependencies {
       isMain: boolean;
       isScheduledTask?: boolean;
       assistantName: string;
+      tanren?: { apiUrl: string; apiKey: string };
+      mcpServers?: Record<
+        string,
+        { type: "http" | "sse"; url: string; headers?: Record<string, string> }
+      >;
     },
     onProcess: (proc: ChildProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -166,6 +178,9 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   };
 
   try {
+    const tanrenConfig = isMain ? deps.readTanrenConfig() : undefined;
+    const mcpServersConfig = deps.readMcpServersConfig(task.group_folder, isMain);
+
     const output = await deps.runAgent(
       group,
       {
@@ -176,6 +191,8 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
+        tanren: tanrenConfig ?? undefined,
+        mcpServers: mcpServersConfig,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

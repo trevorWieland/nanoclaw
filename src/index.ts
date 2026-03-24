@@ -453,6 +453,9 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+    readTanrenConfig,
+    readMcpServersConfig: (groupFolder, isMain) =>
+      loadMcpServers(MCP_SERVERS_CONFIG_PATH, groupFolder, isMain),
     runAgent: runContainerAgent,
   });
   startIpcWatcher({
