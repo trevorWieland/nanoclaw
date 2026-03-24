@@ -409,20 +409,32 @@ export async function runContainerAgent(
     "Spawning container agent",
   );
 
-  // Rewrite localhost in tanren URL so the container reaches the host via Docker gateway.
+  // Rewrite localhost URLs so the container reaches the host via Docker gateway.
   // Validate before spawning so a schema failure cannot leak an orphan container.
-  const containerInput = input.tanren
-    ? {
-        ...input,
-        tanren: {
-          ...input.tanren,
-          apiUrl: input.tanren.apiUrl.replace(
-            /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
-            `//${CONTAINER_HOST_GATEWAY}`,
+  const rewriteLocalhostUrl = (url: string) =>
+    url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, `//${CONTAINER_HOST_GATEWAY}`);
+
+  const containerInput = {
+    ...input,
+    ...(input.tanren
+      ? {
+          tanren: {
+            ...input.tanren,
+            apiUrl: rewriteLocalhostUrl(input.tanren.apiUrl),
+          },
+        }
+      : {}),
+    ...(input.mcpServers
+      ? {
+          mcpServers: Object.fromEntries(
+            Object.entries(input.mcpServers).map(([name, server]) => [
+              name,
+              { ...server, url: rewriteLocalhostUrl(server.url) },
+            ]),
           ),
-        },
-      }
-    : input;
+        }
+      : {}),
+  };
   ContainerInputSchema.parse(containerInput);
 
   // Store host-side container logs outside the container-writable group directory.

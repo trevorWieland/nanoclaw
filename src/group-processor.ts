@@ -73,6 +73,10 @@ interface GroupProcessorDeps {
       isMain: boolean;
       assistantName: string;
       tanren?: { apiUrl: string; apiKey: string };
+      mcpServers?: Record<
+        string,
+        { type: "http" | "sse"; url: string; headers?: Record<string, string> }
+      >;
     },
     onProcess: (proc: ChildProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -97,6 +101,12 @@ interface GroupProcessorDeps {
   ) => void;
   getAvailableGroups: () => Promise<AvailableGroup[]>;
   readTanrenConfig: () => { apiUrl: string; apiKey: string } | null | undefined;
+  readMcpServersConfig: (
+    groupFolder: string,
+    isMain: boolean,
+  ) =>
+    | Record<string, { type: "http" | "sse"; url: string; headers?: Record<string, string> }>
+    | undefined;
 }
 
 /**
@@ -147,6 +157,7 @@ export function createGroupProcessor(
       : undefined;
 
     const tanrenConfig = isMain ? deps.readTanrenConfig() : undefined;
+    const mcpServersConfig = deps.readMcpServersConfig(group.folder, isMain);
 
     try {
       const output = await deps.runContainerAgent(
@@ -159,6 +170,7 @@ export function createGroupProcessor(
           isMain,
           assistantName: ASSISTANT_NAME,
           tanren: tanrenConfig ?? undefined,
+          mcpServers: mcpServersConfig,
         },
         (proc, containerName) =>
           deps.queue.registerProcess(chatJid, proc, containerName, group.folder),

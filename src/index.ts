@@ -10,7 +10,13 @@
 import fs from "fs";
 import path from "path";
 
-import { ASSISTANT_NAME, CREDENTIAL_PROXY_PORT, STATUS_BIND_HOST, STATUS_PORT } from "./config.js";
+import {
+  ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
+  MCP_SERVERS_CONFIG_PATH,
+  STATUS_BIND_HOST,
+  STATUS_PORT,
+} from "./config.js";
 import { startCredentialProxy } from "./credential-proxy.js";
 import { loadDeclarativeGroups } from "./declarative-groups.js";
 import "./channels/index.js";
@@ -41,6 +47,7 @@ import { GroupQueue } from "./group-queue.js";
 import { resolveGroupFolderPath } from "./group-folder.js";
 import { createGroupProcessor } from "./group-processor.js";
 import { startIpcWatcher } from "./ipc.js";
+import { loadMcpServers } from "./mcp-servers.js";
 import { startMessageLoop } from "./message-loop.js";
 import { recoverPendingMessages } from "./recovery.js";
 import { restoreRemoteControl, startRemoteControl, stopRemoteControl } from "./remote-control.js";
@@ -426,6 +433,8 @@ async function main(): Promise<void> {
     writeGroupsSnapshot,
     getAvailableGroups,
     readTanrenConfig,
+    readMcpServersConfig: (groupFolder, isMain) =>
+      loadMcpServers(MCP_SERVERS_CONFIG_PATH, groupFolder, isMain),
   });
 
   // Start subsystems (independently of connection handler)

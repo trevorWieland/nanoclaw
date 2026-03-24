@@ -62,6 +62,7 @@ function resolveConfigWithLegacy(filename: string): string {
 
 export const MOUNT_ALLOWLIST_PATH = resolveConfigWithLegacy("mount-allowlist.json");
 export const SENDER_ALLOWLIST_PATH = resolveConfigWithLegacy("sender-allowlist.json");
+export const MCP_SERVERS_CONFIG_PATH = resolveConfigWithLegacy("mcp-servers.json");
 
 export const STORE_DIR = path.resolve(
   process.env.NANOCLAW_STORE_DIR || path.join(PROJECT_ROOT, "store"),

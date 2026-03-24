@@ -34,6 +34,16 @@ const ContainerInputSchema = z.object({
       apiKey: z.string(),
     })
     .optional(),
+  mcpServers: z
+    .record(
+      z.string(),
+      z.object({
+        type: z.enum(["http", "sse"]),
+        url: z.string(),
+        headers: z.record(z.string(), z.string()).optional(),
+      }),
+    )
+    .optional(),
 });
 
 type ContainerInput = z.infer<typeof ContainerInputSchema>;
@@ -460,6 +470,11 @@ async function runQuery(
         if (containerInput.isMain && containerInput.tanren) {
           tools.push("mcp__tanren__*");
         }
+        if (containerInput.mcpServers) {
+          for (const name of Object.keys(containerInput.mcpServers)) {
+            tools.push(`mcp__${name}__*`);
+          }
+        }
         return tools;
       })(),
       env: sdkEnv,
@@ -467,10 +482,7 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ["project", "user"],
       mcpServers: (() => {
-        const servers: Record<
-          string,
-          { command: string; args: string[]; env: Record<string, string> }
-        > = {
+        const servers: Record<string, object> = {
           nanoclaw: {
             command: "node",
             args: [mcpServerPath],
@@ -490,6 +502,11 @@ async function runQuery(
               TANREN_API_KEY: containerInput.tanren.apiKey,
             },
           };
+        }
+        if (containerInput.mcpServers) {
+          for (const [name, server] of Object.entries(containerInput.mcpServers)) {
+            servers[name] = server;
+          }
         }
         return servers;
       })(),
