@@ -15,6 +15,7 @@
  */
 
 import fs from "fs";
+import { access, mkdir, readdir, readFile, unlink } from "fs/promises";
 import path from "path";
 import {
   query,
@@ -297,36 +298,35 @@ function formatTranscriptMarkdown(
 /**
  * Check for _close sentinel.
  */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
+async function shouldClose(): Promise<boolean> {
+  try {
+    await access(IPC_INPUT_CLOSE_SENTINEL);
     try {
-      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+      await unlink(IPC_INPUT_CLOSE_SENTINEL);
     } catch {
       /* ignore */
     }
     return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+async function drainIpcInput(): Promise<string[]> {
   try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs
-      .readdirSync(IPC_INPUT_DIR)
-      .filter((f) => f.endsWith(".json"))
-      .sort();
+    await mkdir(IPC_INPUT_DIR, { recursive: true });
+    const files = (await readdir(IPC_INPUT_DIR)).filter((f) => f.endsWith(".json")).sort();
 
     const messages: string[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        fs.unlinkSync(filePath);
+        const raw = JSON.parse(await readFile(filePath, "utf-8"));
+        await unlink(filePath);
         const parsed = FollowUpMessageSchema.safeParse(raw);
         if (parsed.success) {
           messages.push(parsed.data.text);
@@ -338,7 +338,7 @@ function drainIpcInput(): string[] {
           `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
         );
         try {
-          fs.unlinkSync(filePath);
+          await unlink(filePath);
         } catch {
           /* ignore */
         }
@@ -351,25 +351,76 @@ function drainIpcInput(): string[] {
   }
 }
 
+const IPC_WAIT_DEBOUNCE_MS = 50;
+const IPC_WAIT_FALLBACK_MS = 2000;
+
 /**
  * Wait for a new IPC message or _close sentinel.
+ * Uses fs.watch for immediate notification with a slow-poll fallback.
  * Returns the messages as a single string, or null if _close.
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
+    let resolved = false;
+    let watcher: fs.FSWatcher | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = () => {
+      if (watcher) {
+        watcher.close();
+        watcher = null;
+      }
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+    };
+
+    const check = async () => {
+      if (resolved) return;
+      if (await shouldClose()) {
+        resolved = true;
+        cleanup();
         resolve(null);
         return;
       }
-      const messages = drainIpcInput();
+      const messages = await drainIpcInput();
       if (messages.length > 0) {
+        resolved = true;
+        cleanup();
         resolve(messages.join("\n"));
-        return;
       }
-      setTimeout(poll, IPC_POLL_MS);
     };
-    poll();
+
+    const scheduleCheck = () => {
+      if (resolved) return;
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => check(), IPC_WAIT_DEBOUNCE_MS);
+    };
+
+    // Set up fs.watch on the input directory
+    try {
+      watcher = fs.watch(IPC_INPUT_DIR, () => {
+        scheduleCheck();
+      });
+      watcher.on("error", () => {
+        watcher = null;
+        // Fallback interval continues to handle it
+      });
+    } catch {
+      // fs.watch failed to start; fallback polling handles it
+    }
+
+    // Safety-net slow poll
+    fallbackTimer = setInterval(scheduleCheck, IPC_WAIT_FALLBACK_MS);
+
+    // Initial check (files may have arrived before watcher was set up)
+    check();
   });
 }
 
@@ -394,21 +445,23 @@ async function runQuery(
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
+  const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
-    if (shouldClose()) {
+    if (await shouldClose()) {
       log("Close sentinel detected during query, ending stream");
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
+    const messages = await drainIpcInput();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
     }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+    if (ipcPolling) {
+      setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+    }
   };
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
@@ -599,11 +652,11 @@ async function main(): Promise<void> {
   }
 
   let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+  await mkdir(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
   try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    await unlink(IPC_INPUT_CLOSE_SENTINEL);
   } catch {
     /* ignore */
   }
@@ -622,7 +675,7 @@ async function main(): Promise<void> {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
   if (!isSessionSlashCommand) {
-    const pending = drainIpcInput();
+    const pending = await drainIpcInput();
     if (pending.length > 0) {
       log(`Draining ${pending.length} pending IPC messages into initial prompt`);
       prompt += "\n" + pending.join("\n");

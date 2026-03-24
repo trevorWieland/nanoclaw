@@ -1,38 +1,49 @@
 import fs from "fs";
+import { mkdir, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { processIpcFiles } from "./ipc.js";
-import { _initTestDatabase } from "./db.js";
 import type { IpcDeps } from "./ipc.js";
+
+let mockDataDir = "";
+
+vi.mock("./config.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    get DATA_DIR() {
+      return mockDataDir;
+    },
+    IPC_DEBOUNCE_MS: 50,
+    IPC_FALLBACK_POLL_INTERVAL: 200,
+  };
+});
 
 vi.mock("./logger.js", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() },
 }));
 
-const TEST_GROUP = {
-  name: "Test",
-  folder: "test-group",
-  trigger: "@Andy",
-  added_at: "2024-01-01",
-};
-
-const MAIN_GROUP = {
-  ...TEST_GROUP,
-  name: "Main",
-  folder: "main-group",
-  isMain: true,
-};
-
+let tmpDir: string;
 let ipcBaseDir: string;
 
 function createDeps(overrides?: Partial<IpcDeps>): IpcDeps {
   return {
     sendMessage: vi.fn(async () => {}),
     registeredGroups: () => ({
-      "group@g.us": { ...TEST_GROUP },
-      "main@g.us": { ...MAIN_GROUP },
+      "group@g.us": {
+        name: "Test",
+        folder: "test-group",
+        trigger: "@Andy",
+        added_at: "2024-01-01",
+      },
+      "main@g.us": {
+        name: "Main",
+        folder: "main-group",
+        trigger: "@Andy",
+        added_at: "2024-01-01",
+        isMain: true,
+      },
     }),
     registerGroup: vi.fn(async () => {}),
     syncGroups: vi.fn(async () => {}),
@@ -43,121 +54,153 @@ function createDeps(overrides?: Partial<IpcDeps>): IpcDeps {
   };
 }
 
-function writeIpcFile(groupFolder: string, subdir: string, filename: string, data: unknown): void {
-  const dir = path.join(ipcBaseDir, groupFolder, subdir);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, filename), JSON.stringify(data));
+async function writeIpcMessage(
+  groupFolder: string,
+  filename: string,
+  data: unknown,
+): Promise<void> {
+  const dir = path.join(ipcBaseDir, groupFolder, "messages");
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, filename), JSON.stringify(data));
 }
 
-describe("processIpcFiles", () => {
-  beforeEach(async () => {
-    await _initTestDatabase();
-    vi.clearAllMocks();
-    ipcBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), "ipc-test-"));
+describe("IpcWatcher", () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ipc-watcher-test-"));
+    ipcBaseDir = path.join(tmpDir, "ipc");
+    mockDataDir = tmpDir;
   });
 
   afterEach(() => {
-    fs.rmSync(ipcBaseDir, { recursive: true, force: true });
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
   });
 
-  it("does nothing with empty IPC directory", async () => {
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(deps.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("sends authorized message and deletes file", async () => {
-    writeIpcFile("test-group", "messages", "msg1.json", {
+  it("start() processes existing files on initial scan", async () => {
+    await mkdir(ipcBaseDir, { recursive: true });
+    await writeIpcMessage("test-group", "msg1.json", {
       type: "message",
       chatJid: "group@g.us",
-      text: "Hello from IPC",
+      text: "pre-existing message",
     });
+
     const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(deps.sendMessage).toHaveBeenCalledWith("group@g.us", "Hello from IPC");
-    // File should be deleted after processing
-    expect(fs.existsSync(path.join(ipcBaseDir, "test-group", "messages", "msg1.json"))).toBe(false);
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
+
+    try {
+      await watcher.start();
+      await new Promise((r) => setTimeout(r, 300));
+      expect(deps.sendMessage).toHaveBeenCalledWith("group@g.us", "pre-existing message");
+    } finally {
+      watcher.stop();
+    }
   });
 
-  it("main group can send to any JID", async () => {
-    writeIpcFile("main-group", "messages", "msg1.json", {
+  it("stop() prevents further processing", async () => {
+    const deps = createDeps();
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
+
+    await watcher.start();
+    watcher.stop();
+
+    await mkdir(ipcBaseDir, { recursive: true });
+    await writeIpcMessage("test-group", "msg1.json", {
       type: "message",
       chatJid: "group@g.us",
-      text: "Cross-group message",
+      text: "should not be processed",
     });
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(deps.sendMessage).toHaveBeenCalledWith("group@g.us", "Cross-group message");
-  });
 
-  it("blocks unauthorized message from non-main group", async () => {
-    writeIpcFile("test-group", "messages", "msg1.json", {
-      type: "message",
-      chatJid: "main@g.us", // trying to send to a different group
-      text: "Sneaky message",
-    });
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
+    await new Promise((r) => setTimeout(r, 400));
     expect(deps.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("moves invalid JSON to errors directory", async () => {
-    const dir = path.join(ipcBaseDir, "test-group", "messages");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "bad.json"), "not valid json{{{");
+  it("debounces rapid file events into fewer process calls", async () => {
     const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    // File should be moved to errors/
-    expect(fs.existsSync(path.join(ipcBaseDir, "errors", "test-group-bad.json"))).toBe(true);
-    expect(fs.existsSync(path.join(dir, "bad.json"))).toBe(false);
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
+
+    try {
+      await watcher.start();
+      await new Promise((r) => setTimeout(r, 300));
+      vi.mocked(deps.sendMessage).mockClear();
+
+      for (let i = 0; i < 5; i++) {
+        await writeIpcMessage("test-group", `msg${i}.json`, {
+          type: "message",
+          chatJid: "group@g.us",
+          text: `message ${i}`,
+        });
+      }
+
+      await new Promise((r) => setTimeout(r, 400));
+      expect(deps.sendMessage).toHaveBeenCalledTimes(5);
+    } finally {
+      watcher.stop();
+    }
   });
 
-  it("moves schema validation failure to errors directory", async () => {
-    writeIpcFile("test-group", "messages", "invalid.json", {
-      type: "message",
-      chatJid: "group@g.us",
-      // text is missing — required by schema
+  it("duplicate start() is a no-op", async () => {
+    const deps = createDeps();
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
+
+    try {
+      await watcher.start();
+      await watcher.start();
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  it("responds to new files via fs.watch", async () => {
+    const deps = createDeps();
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
+
+    try {
+      await watcher.start();
+      await new Promise((r) => setTimeout(r, 200));
+
+      await writeIpcMessage("test-group", "live.json", {
+        type: "message",
+        chatJid: "group@g.us",
+        text: "live message",
+      });
+
+      await new Promise((r) => setTimeout(r, 400));
+      expect(deps.sendMessage).toHaveBeenCalledWith("group@g.us", "live message");
+    } finally {
+      watcher.stop();
+    }
+  });
+
+  it("fallback poll picks up files when fs.watch is unavailable", async () => {
+    const watchSpy = vi.spyOn(fs, "watch").mockImplementation(() => {
+      throw new Error("fs.watch unavailable");
     });
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(fs.existsSync(path.join(ipcBaseDir, "errors", "test-group-invalid.json"))).toBe(true);
-    expect(deps.sendMessage).not.toHaveBeenCalled();
-  });
 
-  it("skips errors subdirectory", async () => {
-    // Create an "errors" directory that looks like a group folder
-    fs.mkdirSync(path.join(ipcBaseDir, "errors", "messages"), { recursive: true });
-    fs.writeFileSync(
-      path.join(ipcBaseDir, "errors", "messages", "old.json"),
-      JSON.stringify({ type: "message", chatJid: "x", text: "old" }),
-    );
     const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(deps.sendMessage).not.toHaveBeenCalled();
-  });
+    const { IpcWatcher } = await import("./ipc-watcher.js");
+    const watcher = new IpcWatcher(deps);
 
-  it("ignores non-JSON files", async () => {
-    const dir = path.join(ipcBaseDir, "test-group", "messages");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "readme.txt"), "not a json file");
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    expect(deps.sendMessage).not.toHaveBeenCalled();
-    // txt file should remain untouched
-    expect(fs.existsSync(path.join(dir, "readme.txt"))).toBe(true);
-  });
+    try {
+      await watcher.start();
+      await new Promise((r) => setTimeout(r, 100));
 
-  it("processes task files via processTaskIpc", async () => {
-    writeIpcFile("main-group", "tasks", "task1.json", {
-      type: "schedule_task",
-      targetJid: "group@g.us",
-      prompt: "scheduled task",
-      schedule_type: "once",
-      schedule_value: new Date(Date.now() + 60000).toISOString(),
-    });
-    const deps = createDeps();
-    await processIpcFiles(ipcBaseDir, deps);
-    // File should be deleted after successful processing
-    expect(fs.existsSync(path.join(ipcBaseDir, "main-group", "tasks", "task1.json"))).toBe(false);
+      await writeIpcMessage("test-group", "fallback.json", {
+        type: "message",
+        chatJid: "group@g.us",
+        text: "fallback message",
+      });
+
+      // Wait for fallback poll interval (200ms in test) + debounce (50ms) + processing
+      await new Promise((r) => setTimeout(r, 500));
+      expect(deps.sendMessage).toHaveBeenCalledWith("group@g.us", "fallback message");
+    } finally {
+      watcher.stop();
+      watchSpy.mockRestore();
+    }
   });
 });

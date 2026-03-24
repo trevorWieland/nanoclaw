@@ -359,7 +359,7 @@ describe("refresh_groups authorization", () => {
 });
 
 // --- IPC message authorization ---
-// Tests the authorization pattern from startIpcWatcher (ipc.ts).
+// Tests the authorization pattern from processIpcFiles (ipc.ts).
 // The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
 
 describe("IPC message authorization", () => {
