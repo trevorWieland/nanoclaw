@@ -379,4 +379,21 @@ describe("loadMcpServers", () => {
       my_server_2: { type: "sse", url: "http://example.com/sse" },
     });
   });
+
+  it("does not treat prototype properties as group overrides", () => {
+    // "constructor" is a valid server name but also exists on Object.prototype.
+    // Global config defining it must not be mistakenly treated as a group override
+    // when the group config is empty.
+    process.env.SOME_KEY = "val";
+    const globalConfig = {
+      constructor: { type: "http", url: "http://example.com/${SOME_KEY}" },
+    };
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/config/mcp-servers.json");
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(globalConfig));
+
+    const result = loadMcpServers("/config/mcp-servers.json", "test-group", true);
+    expect(result).toEqual({
+      constructor: { type: "http", url: "http://example.com/val" },
+    });
+  });
 });

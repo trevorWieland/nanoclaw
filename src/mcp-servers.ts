@@ -196,7 +196,7 @@ export function loadMcpServers(
 
   const resolved: Record<string, ResolvedMcpServer> = {};
   for (const name of allNames) {
-    const isFromGroup = name in groupEntries;
+    const isFromGroup = Object.hasOwn(groupEntries, name);
     const entry = isFromGroup ? groupEntries[name] : globalEntries[name];
 
     if (entry.onlyMain && !isMain) continue;
