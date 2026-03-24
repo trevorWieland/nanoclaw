@@ -18,9 +18,6 @@ groups/*
 groups/main/*
 groups/global/*
 
-# Personal architecture docs
-docs/AEGIS-ARCHITECTURE.md
-
 # Secrets
 *.keys.json
 .env

@@ -19,23 +19,30 @@ This repository (`trevorWieland/nanoclaw`) is a personal public fork of upstream
 | Contribution target for major changes | Upstream repository                               | Upstream repository                             |
 | Contribution target for fork context  | Not applicable                                    | This fork (docs and small personal adjustments) |
 
-## Intentional Divergences in This Fork
+## What This Fork Adds
 
-- Reader journey docs (`START_HERE`, `FORK_OVERVIEW`, `FORK_SYNC`) are first-class entry points.
-- Architecture/spec/security docs include concise `Fork-specific note` callouts where assumptions are local to this implementation.
-- Contribution guidance explicitly redirects substantial feature and bugfix work to upstream.
-- Operational overlays are documented explicitly (resilience controls, coordinator patterns, optional worker-manager IPC integration).
+- **Postgres backend** — pluggable DataStore interface with SQLite (default) and Postgres adapters
+- **Docker-out-of-Docker** — host NanoClaw runs in Docker, spawns agent containers via docker.sock
+- **Health monitoring** — extensible health sources, status server endpoint
+- **Tanren integration** — VM provisioning via API client and container-side MCP server
+- **Auth circuit breaker** — backoff cooldown on 401/403 to prevent retry storms
+- **Credential proxy enhancements** — OAuth token auto-refresh, credentials.json fallback
+- **Message deduplication** — SHA256 fingerprint prevents duplicate outbound messages
+- **Modernized toolchain** — pnpm, tsgo, oxfmt, oxlint, vitest, turbo, knip (replacing npm/prettier/eslint)
+- **Extracted modules** — group-processor, message-loop, recovery for testability
+- **Remote control** — Claude Code editor integration for session management
 
 ## Who Should Use This Fork
 
 Use this fork if you:
 
+- Want the full feature set (Postgres, Docker-out-of-Docker, health monitoring, tanren integration).
 - Want a practical remix base with clear docs for personal use.
 - Prefer explicit guidance on what to keep local vs what to upstream.
 
 Use upstream if you:
 
-- Want the canonical source of truth without this fork's personal overlays.
+- Want the canonical baseline without fork-specific additions.
 - Plan to contribute substantive platform improvements directly.
 
 ## Fork vs Other Approaches (High-Level)

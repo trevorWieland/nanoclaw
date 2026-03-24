@@ -15,7 +15,59 @@ This repository is a personal public fork (`trevorWieland/nanoclaw`) of upstream
 
 2. **Check alignment.** Read the [Philosophy section in README.md](README.md#philosophy). Source code changes should only be things 90%+ of users need. Skills can be more niche, but should still be useful beyond a single person's setup.
 
-3. **One thing per PR.** Each PR should do one thing — one bug fix, one skill, one simplification. Don't mix unrelated changes in a single PR.
+3. **One thing per PR.** Each PR should do one thing -- one bug fix, one skill, one simplification. Don't mix unrelated changes in a single PR.
+
+## Development Setup
+
+Requires Node.js 24+ and pnpm.
+
+```bash
+gh repo fork trevorWieland/nanoclaw --clone
+cd nanoclaw
+pnpm install
+pnpm run dev        # Run with hot reload
+pnpm run build      # Compile TypeScript (tsgo)
+pnpm run check      # Run all checks (format, lint, typecheck, test, knip)
+```
+
+## Toolchain
+
+| Tool   | Command                                   | Purpose                                         |
+| ------ | ----------------------------------------- | ----------------------------------------------- |
+| oxfmt  | `pnpm run format` / `pnpm run format:fix` | Format all project files                        |
+| oxlint | `pnpm run lint` / `pnpm run lint:fix`     | Lint for correctness issues                     |
+| tsgo   | `pnpm run typecheck`                      | Type-check without emitting                     |
+| vitest | `pnpm run test`                           | Run 360+ unit tests                             |
+| knip   | `pnpm run knip`                           | Detect dead code and unused deps                |
+| turbo  | `pnpm run check`                          | Run format+lint+typecheck+test+knip in parallel |
+
+## Project Structure
+
+```
+src/                    Host orchestrator (TypeScript ESM)
+  channels/             Channel registry + Discord adapter
+  datastore/            SQLite and Postgres adapters
+  tanren/               Tanren API client
+  health-sources/       Health monitoring sources
+container/
+  agent-runner/         Separate package: container-side agent (Claude Agent SDK)
+  skills/               Skills loaded inside agent containers
+  Dockerfile            Agent container image
+  build.sh              Container build script
+Dockerfile              Host container image (Docker-out-of-Docker)
+.claude/skills/         Host-side skill definitions (SKILL.md files)
+groups/                 Per-group memory and config (not committed)
+docs/                   Architecture, security, spec documentation
+setup/                  Setup flow scripts and tests
+```
+
+## Coding Style
+
+- TypeScript ESM with strict typing
+- 2-space indent, double quotes (oxfmt enforced)
+- kebab-case filenames (e.g. `container-runner.ts`)
+- Tests colocated as `*.test.ts`
+- Pino structured logging: object first, message second: `logger.warn({ err, groupJid }, "msg")`
 
 ## Where Contributions Should Go
 
@@ -28,11 +80,11 @@ This repository is a personal public fork (`trevorWieland/nanoclaw`) of upstream
 
 **Contribute to this fork for:**
 
-- Fork-specific documentation (`README`, `docs/START_HERE.md`, `docs/FORK_*.md`)
+- Fork-specific documentation
 - Clarifications that help friends/family remix this fork
 - Small personal adjustments that do not change core project direction
 
-## Source Code Changes in This Fork
+### Source Code Changes in This Fork
 
 Changes here should stay narrow and easy to sync with upstream.
 
@@ -43,7 +95,7 @@ If your change could benefit most NanoClaw users, open it upstream first.
 
 ## Skills Contributions
 
-NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) — markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in NanoClaw, each serving a different purpose.
+NanoClaw uses [Claude Code skills](https://code.claude.com/docs/en/skills) -- markdown files with optional supporting files that teach Claude how to do something. There are four types of skills in NanoClaw, each serving a different purpose.
 
 Submit broadly useful skills to upstream `qwibitai/nanoclaw`; keep fork-specific skills here.
 
@@ -53,10 +105,7 @@ Your skill should contain the **instructions** Claude follows to add the feature
 
 ### Why skills?
 
-## Testing Expectations
-
-- Test your skill or doc workflow on a fresh clone before submitting.
-- For fork-specific docs changes, verify links and cross-doc consistency.
+Skills let NanoClaw grow without bloating core source. Each skill is self-contained, testable independently, and can be adopted or ignored per-installation. The skills-as-branches architecture means feature skills live on dedicated git branches and are merged in only when needed.
 
 ### Skill types
 
@@ -78,7 +127,7 @@ Add capabilities to NanoClaw by merging a git branch. The SKILL.md contains setu
 
 1. Fork `trevorWieland/nanoclaw` and branch from `main`
 2. Make the code changes (new files, modified source, updated `package.json`, etc.)
-3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions — step 1 should be merging the branch
+3. Add a SKILL.md in `.claude/skills/<name>/` with setup instructions -- step 1 should be merging the branch
 4. Open a PR. We'll create the `skill/<name>` branch from your work
 
 See `/add-telegram` for a good example. See [docs/skills-as-branches.md](docs/skills-as-branches.md) for the full system design.
@@ -101,7 +150,7 @@ Standalone tools that ship code files alongside the SKILL.md. The SKILL.md tells
 
 #### 3. Operational skills (instruction-only)
 
-Workflows and guides with no code changes. The SKILL.md is the entire skill — Claude follows the instructions to perform a task.
+Workflows and guides with no code changes. The SKILL.md is the entire skill -- Claude follows the instructions to perform a task.
 
 **Location:** `.claude/skills/` on `main`
 
@@ -109,7 +158,7 @@ Workflows and guides with no code changes. The SKILL.md is the entire skill — 
 
 **Guidelines:**
 
-- Pure instructions — no code files, no branch merges
+- Pure instructions -- no code files, no branch merges
 - Use `AskUserQuestion` for interactive prompts
 - These stay on `main` and are always available to every user
 
@@ -127,7 +176,7 @@ Skills that run inside the agent container, not on the host. These teach the con
 
 - Follow the same SKILL.md + frontmatter format
 - Use `allowed-tools` frontmatter to scope tool permissions
-- Keep them focused — the agent's context window is shared across all container skills
+- Keep them focused -- the agent's context window is shared across all container skills
 
 ### SKILL.md format
 
@@ -144,9 +193,9 @@ Instructions here...
 
 **Rules:**
 
-- Keep SKILL.md **under 500 lines** — move detail to separate reference files
+- Keep SKILL.md **under 500 lines** -- move detail to separate reference files
 - `name`: lowercase, alphanumeric + hyphens, max 64 chars
-- `description`: required — Claude uses this to decide when to invoke the skill
+- `description`: required -- Claude uses this to decide when to invoke the skill
 - Put code in separate files, not inline in the markdown
 - See the [skills standard](https://code.claude.com/docs/en/skills) for all available frontmatter fields
 
@@ -154,26 +203,32 @@ Instructions here...
 
 Catch blocks in this codebase fall into four categories:
 
-1. **Handled** — the error triggers recovery logic (retry, fallback, circuit-breaker trip)
-2. **Re-thrown with context** — caught, wrapped with additional context, then re-thrown
-3. **Logged with sufficient detail** — caught and logged with enough structured context to diagnose from logs alone
-4. **Swallowed** — caught with no logging or incomplete context (**avoid this**)
+1. **Handled** -- the error triggers recovery logic (retry, fallback, circuit-breaker trip)
+2. **Re-thrown with context** -- caught, wrapped with additional context, then re-thrown
+3. **Logged with sufficient detail** -- caught and logged with enough structured context to diagnose from logs alone
+4. **Swallowed** -- caught with no logging or incomplete context (**avoid this**)
 
 ### Guidelines
 
 - **Re-throw vs log-and-continue:** Re-throw when the caller needs to know the operation failed. Log-and-continue when the operation is best-effort and the system can proceed without it.
 - **Custom error classes:** Only create them when callers need `instanceof` branching (see `PartialSendError` in `src/types.ts` and `TanrenAPIError` in `src/tanren/errors.ts`).
 - **Required context in error logs:** Include the operation being attempted, group name/JID if applicable, and relevant IDs or input values that help reproduce the issue.
-- **Pino structured logging:** Object first, message second: `logger.warn({ err, groupJid }, "Failed to write IPC message")`. Always pass errors under the `err` key (e.g. `{ err }`, not `{ error: err }`); never stringify errors — Pino serializes errors on the `err` key automatically.
+- **Pino structured logging:** Object first, message second: `logger.warn({ err, groupJid }, "Failed to write IPC message")`. Always pass errors under the `err` key (e.g. `{ err }`, not `{ error: err }`); never stringify errors -- Pino serializes errors on the `err` key automatically.
 - **Intentional suppression:** If a catch block must be empty, add a comment: `// Intentionally suppressed: <reason>`.
+
+## Testing Expectations
+
+- Test your skill or doc workflow on a fresh clone before submitting.
+- For fork-specific docs changes, verify links and cross-doc consistency.
 
 ## Pull Requests
 
 ### Before opening
 
-1. **Link related issues.** If your PR resolves an open issue, include `Closes #123` in the description so it's auto-closed on merge.
-2. **Test thoroughly.** Run the feature yourself. For skills, test on a fresh clone.
-3. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
+1. **Run checks.** Run `pnpm run check` and fix any failures before opening a PR.
+2. **Link related issues.** If your PR resolves an open issue, include `Closes #123` in the description so it's auto-closed on merge.
+3. **Test thoroughly.** Run the feature yourself. For skills, test on a fresh clone.
+4. **Check the right box** in the PR template. Labels are auto-applied based on your selection:
 
 | Checkbox                    | Label                       |
 | --------------------------- | --------------------------- |
@@ -188,11 +243,11 @@ Catch blocks in this codebase fall into four categories:
 
 Keep it concise. Remove any template sections that don't apply. The description should cover:
 
-- **What** — what the PR adds or changes
-- **Why** — the motivation
-- **How it works** — brief explanation of the approach
-- **How it was tested** — what you did to verify it works
-- **Usage** — how the user invokes it (for skills)
+- **What** -- what the PR adds or changes
+- **Why** -- the motivation
+- **How it works** -- brief explanation of the approach
+- **How it was tested** -- what you did to verify it works
+- **Usage** -- how the user invokes it (for skills)
 
 Don't pad the description. A few clear sentences are better than lengthy paragraphs.
 
@@ -200,12 +255,12 @@ Don't pad the description. A few clear sentences are better than lengthy paragra
 
 Keep docs aligned to this split:
 
-- `README.md`: concise overview and navigation
-- `docs/SPEC.md`: implementation behavior and interfaces
-- `docs/SECURITY.md`: trust boundaries and security controls
-- `docs/ARCHITECTURE.md`: operating model and orchestration patterns
-- `docs/INSTALLATION_MODEL.md`: code/config separation and group setup patterns
-- `ROADMAP.md`: planned or exploratory future work
+- `README.md`: overview, architecture diagrams, features
+- `docs/SPEC.md`: runtime behavior, commands, interfaces
+- `docs/SECURITY.md`: trust boundaries, security controls
+- `docs/ARCHITECTURE.md`: system architecture, component details
+- `docs/INSTALLATION_MODEL.md`: code/config separation, group setup patterns
+- `CONTRIBUTING.md`: development workflow, contribution guidelines
 
 If you touch behavior and docs in the same PR, update the canonical doc first, then any summary docs.
 
