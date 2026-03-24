@@ -73,6 +73,10 @@ interface GroupProcessorDeps {
       isMain: boolean;
       assistantName: string;
       tanren?: { apiUrl: string; apiKey: string };
+      mcpServers?: Record<
+        string,
+        { type: "http" | "sse"; url: string; headers?: Record<string, string> }
+      >;
     },
     onProcess: (proc: ChildProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -97,6 +101,12 @@ interface GroupProcessorDeps {
   ) => void;
   getAvailableGroups: () => Promise<AvailableGroup[]>;
   readTanrenConfig: () => { apiUrl: string; apiKey: string } | null | undefined;
+  readMcpServersConfig: (
+    groupFolder: string,
+    isMain: boolean,
+  ) =>
+    | Record<string, { type: "http" | "sse"; url: string; headers?: Record<string, string> }>
+    | undefined;
 }
 
 /**
@@ -149,6 +159,11 @@ export function createGroupProcessor(
     const tanrenConfig = isMain ? deps.readTanrenConfig() : undefined;
 
     try {
+      // MCP config loading can throw on malformed JSON, invalid schema, or
+      // reserved names. Must be inside the try block so failures trigger the
+      // cursor rollback path instead of dropping the message batch.
+      const mcpServersConfig = deps.readMcpServersConfig(group.folder, isMain);
+
       const output = await deps.runContainerAgent(
         group,
         {
@@ -159,6 +174,7 @@ export function createGroupProcessor(
           isMain,
           assistantName: ASSISTANT_NAME,
           tanren: tanrenConfig ?? undefined,
+          mcpServers: mcpServersConfig,
         },
         (proc, containerName) =>
           deps.queue.registerProcess(chatJid, proc, containerName, group.folder),

@@ -489,6 +489,73 @@ describe("ContainerInputSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("accepts input with mcpServers (http)", () => {
+    const result = ContainerInputSchema.safeParse({
+      prompt: "hello",
+      groupFolder: "test-group",
+      chatJid: "group@g.us",
+      isMain: true,
+      mcpServers: {
+        vectordb: { type: "http", url: "http://example.com/mcp" },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts input with mcpServers (sse with headers)", () => {
+    const result = ContainerInputSchema.safeParse({
+      prompt: "hello",
+      groupFolder: "test-group",
+      chatJid: "group@g.us",
+      isMain: true,
+      mcpServers: {
+        myserver: {
+          type: "sse",
+          url: "http://example.com/sse",
+          headers: { Authorization: "Bearer token123" },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts input without mcpServers (backward compatible)", () => {
+    const result = ContainerInputSchema.safeParse({
+      prompt: "hello",
+      groupFolder: "test-group",
+      chatJid: "group@g.us",
+      isMain: false,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects mcpServers with invalid type", () => {
+    const result = ContainerInputSchema.safeParse({
+      prompt: "hello",
+      groupFolder: "test-group",
+      chatJid: "group@g.us",
+      isMain: true,
+      mcpServers: {
+        bad: { type: "websocket", url: "ws://example.com" },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts mcpServers with multiple servers", () => {
+    const result = ContainerInputSchema.safeParse({
+      prompt: "hello",
+      groupFolder: "test-group",
+      chatJid: "group@g.us",
+      isMain: true,
+      mcpServers: {
+        server1: { type: "http", url: "http://a.com/mcp" },
+        server2: { type: "sse", url: "http://b.com/sse" },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 // =========================================

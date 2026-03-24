@@ -250,6 +250,61 @@ describe("container-runner tanren passthrough", () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
   });
+
+  it("includes mcpServers in stdin JSON when provided", async () => {
+    const mcpServers = {
+      vectordb: { type: "http" as const, url: "http://remote.example.com/mcp" },
+    };
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: true, mcpServers },
+      () => {},
+    );
+
+    const stdinData = (fakeProc.stdin as PassThrough).read();
+    expect(stdinData).not.toBeNull();
+    const parsed = JSON.parse(stdinData!.toString());
+    expect(parsed.mcpServers).toEqual(mcpServers);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("rewrites localhost URLs in mcpServers for container networking", async () => {
+    const mcpServers = {
+      local: { type: "http" as const, url: "http://localhost:9090/mcp" },
+      remote: { type: "sse" as const, url: "http://remote.example.com/sse" },
+    };
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: true, mcpServers },
+      () => {},
+    );
+
+    const stdinData = (fakeProc.stdin as PassThrough).read();
+    expect(stdinData).not.toBeNull();
+    const parsed = JSON.parse(stdinData!.toString());
+    expect(parsed.mcpServers.local.url).toBe("http://host.docker.internal:9090/mcp");
+    expect(parsed.mcpServers.remote.url).toBe("http://remote.example.com/sse");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("does not include mcpServers in stdin when not provided", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const stdinData = (fakeProc.stdin as PassThrough).read();
+    expect(stdinData).not.toBeNull();
+    const parsed = JSON.parse(stdinData!.toString());
+    expect(parsed.mcpServers).toBeUndefined();
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
 });
 
 describe("container-runner instance label", () => {

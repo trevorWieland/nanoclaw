@@ -16,7 +16,12 @@
 
 import fs from "fs";
 import path from "path";
-import { query, HookCallback, PreCompactHookInput } from "@anthropic-ai/claude-agent-sdk";
+import {
+  query,
+  HookCallback,
+  McpServerConfig,
+  PreCompactHookInput,
+} from "@anthropic-ai/claude-agent-sdk";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 
@@ -33,6 +38,16 @@ const ContainerInputSchema = z.object({
       apiUrl: z.string(),
       apiKey: z.string(),
     })
+    .optional(),
+  mcpServers: z
+    .record(
+      z.string(),
+      z.object({
+        type: z.enum(["http", "sse"]),
+        url: z.string(),
+        headers: z.record(z.string(), z.string()).optional(),
+      }),
+    )
     .optional(),
 });
 
@@ -460,6 +475,11 @@ async function runQuery(
         if (containerInput.isMain && containerInput.tanren) {
           tools.push("mcp__tanren__*");
         }
+        if (containerInput.mcpServers) {
+          for (const name of Object.keys(containerInput.mcpServers)) {
+            tools.push(`mcp__${name}__*`);
+          }
+        }
         return tools;
       })(),
       env: sdkEnv,
@@ -467,10 +487,7 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ["project", "user"],
       mcpServers: (() => {
-        const servers: Record<
-          string,
-          { command: string; args: string[]; env: Record<string, string> }
-        > = {
+        const servers: Record<string, McpServerConfig> = {
           nanoclaw: {
             command: "node",
             args: [mcpServerPath],
@@ -490,6 +507,11 @@ async function runQuery(
               TANREN_API_KEY: containerInput.tanren.apiKey,
             },
           };
+        }
+        if (containerInput.mcpServers) {
+          for (const [name, server] of Object.entries(containerInput.mcpServers)) {
+            servers[name] = server;
+          }
         }
         return servers;
       })(),

@@ -106,6 +106,7 @@ function createMockDeps(
     writeGroupsSnapshot: vi.fn(),
     getAvailableGroups: vi.fn(async () => []),
     readTanrenConfig: () => undefined,
+    readMcpServersConfig: () => undefined,
     ...overrides,
   };
 }
@@ -370,6 +371,42 @@ describe("processGroupMessages", () => {
     await process("group@g.us");
     expect(deps.writeTasksSnapshot).toHaveBeenCalled();
     expect(deps.writeGroupsSnapshot).toHaveBeenCalled();
+  });
+
+  it("passes mcpServers config to runContainerAgent", async () => {
+    const msg = makeMsg("1", "hello", "2024-01-01T00:00:01Z");
+    const mcpConfig = {
+      vectordb: {
+        type: "http" as const,
+        url: "http://example.com/mcp",
+        headers: { Authorization: "Bearer token" },
+      },
+    };
+    const deps = createMockDeps({
+      registeredGroups: () => ({ "group@g.us": MAIN_GROUP }),
+      getMessagesSince: vi.fn(async () => [msg]),
+      readMcpServersConfig: () => mcpConfig,
+    });
+    const process = createGroupProcessor(deps);
+    await process("group@g.us");
+    expect(deps.runContainerAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ mcpServers: mcpConfig }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("does not include mcpServers when config returns undefined", async () => {
+    const msg = makeMsg("1", "hello", "2024-01-01T00:00:01Z");
+    const deps = createMockDeps({
+      registeredGroups: () => ({ "group@g.us": MAIN_GROUP }),
+      getMessagesSince: vi.fn(async () => [msg]),
+    });
+    const process = createGroupProcessor(deps);
+    await process("group@g.us");
+    const input = vi.mocked(deps.runContainerAgent).mock.calls[0][1];
+    expect(input.mcpServers).toBeUndefined();
   });
 
   it("handles agent exception gracefully", async () => {

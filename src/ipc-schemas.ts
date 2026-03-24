@@ -149,6 +149,16 @@ export const ContainerInputSchema = z
         apiKey: z.string(),
       })
       .optional(),
+    mcpServers: z
+      .record(
+        z.string(),
+        z.object({
+          type: z.enum(["http", "sse"]),
+          url: z.string(),
+          headers: z.record(z.string(), z.string()).optional(),
+        }),
+      )
+      .optional(),
   })
   .strict();
 
