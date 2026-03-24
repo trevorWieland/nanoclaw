@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/trevorWieland/nanoclaw/actions/workflows/ci.yml"><img src="https://github.com/trevorWieland/nanoclaw/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/trevorWieland/nanoclaw/actions/workflows/container-build.yml"><img src="https://github.com/trevorWieland/nanoclaw/actions/workflows/container-build.yml/badge.svg" alt="Container Build"></a>
-  <img src="https://img.shields.io/badge/version-v1.2.21-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.2.22-blue" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
