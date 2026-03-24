@@ -157,9 +157,13 @@ export function createGroupProcessor(
       : undefined;
 
     const tanrenConfig = isMain ? deps.readTanrenConfig() : undefined;
-    const mcpServersConfig = deps.readMcpServersConfig(group.folder, isMain);
 
     try {
+      // MCP config loading can throw on malformed JSON, invalid schema, or
+      // reserved names. Must be inside the try block so failures trigger the
+      // cursor rollback path instead of dropping the message batch.
+      const mcpServersConfig = deps.readMcpServersConfig(group.folder, isMain);
+
       const output = await deps.runContainerAgent(
         group,
         {
