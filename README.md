@@ -140,9 +140,9 @@ graph TD
         DSOCK[docker.sock]
     end
 
-    HP -->|spawns via| DSOCK
+    HP -->|"spawns via docker.sock"| AC
 
-    subgraph Agent Container - nanoclaw-agent
+    subgraph AC[Agent Container - nanoclaw-agent]
         WG["/workspace/group (read-write)<br/>Group files and CLAUDE.md"]
         WGL["/workspace/global (read-only)<br/>Shared identity"]
         WIPC["/workspace/ipc<br/>File-based messaging"]
@@ -151,10 +151,10 @@ graph TD
         SDK["agent-runner (Claude Agent SDK)"]
     end
 
-    DSOCK --> WG
-    DSOCK --> WGL
-    DSOCK --> WIPC
-    DSOCK --> WEX
+    HP -->|"bind mount"| WG
+    HP -->|"bind mount"| WGL
+    HP -->|"bind mount"| WIPC
+    HP -->|"bind mount"| WEX
 ```
 
 Each agent container is an isolated Linux environment with only explicitly mounted directories visible. The `agent-runner` package inside the container drives the Claude Agent SDK. Containers have Chromium for web access, GitHub CLI, pnpm, and uv pre-installed.

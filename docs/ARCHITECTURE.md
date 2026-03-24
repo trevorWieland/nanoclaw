@@ -100,7 +100,7 @@ The database stores chat metadata, messages, scheduled tasks, router state, sess
 
 **Factory** (`src/datastore/factory.ts`): the `DB_BACKEND` environment variable (`"sqlite"` or `"postgres"`) selects which adapter is instantiated at startup.
 
-**SQLite adapter** (default): uses `better-sqlite3`. Database file lives at `DATA_DIR/store/messages.db` (or the path specified in `DATABASE_URL`). Schema is created inline on first run.
+**SQLite adapter** (default): uses `better-sqlite3`. Database file lives at `<PROJECT_ROOT>/store/messages.db` by default (derived from `STORE_DIR`, overridable via `NANOCLAW_STORE_DIR` or `DATABASE_URL`). Schema is created inline on first run.
 
 **Postgres adapter**: uses the `postgres` npm driver. Requires `DATABASE_URL` to be a Postgres connection string. Runs migrations on startup.
 
@@ -116,7 +116,7 @@ Channels are the messaging interfaces through which users interact with the agen
 
 **Other channels** (WhatsApp, Telegram, Slack, Gmail): installed via skill branches that are merged into the user's fork. Each branch adds a channel module that calls `registerChannel()`.
 
-**Channel interface**: each channel implements `connect()`, `disconnect()`, `sendMessage()`, `ownsJid()`, `isConnected()`, and `getChats()`. Optional methods include `purge()`, `start()`, `syncGroups()`, and `sendEmbed()`.
+**Channel interface** (`src/types.ts`): each channel implements `connect()`, `disconnect()`, `sendMessage()`, `ownsJid()`, and `isConnected()`. Optional methods include `setTyping()`, `syncGroups()`, `purgeMessages()`, and `sendEmbed()`.
 
 At startup, the orchestrator iterates registered channel names, calls each factory, and connects. Factories return `null` when credentials are missing, so unconfigured channels are silently skipped.
 
