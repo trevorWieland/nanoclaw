@@ -71,15 +71,15 @@ export async function handleSessionCommand(opts: {
   if (!command || !cmdMsg) return { handled: false };
 
   if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true)) {
-    // DENIED: send denial if the sender would normally be allowed to interact,
-    // then silently consume the command by advancing the cursor past it.
-    // Trade-off: other messages in the same batch are also consumed (cursor is
-    // a high-water mark). Acceptable for this narrow edge case.
+    // DENIED: send denial but do NOT advance cursor — the cursor is a
+    // high-water mark, so advancing it would permanently skip any earlier
+    // messages in the same batch that haven't been processed yet.
+    // Return handled: false so processing falls through to the normal
+    // trigger path which handles the full batch correctly.
     if (deps.canSenderInteract(cmdMsg)) {
       await deps.sendMessage("Session commands require admin access.");
     }
-    await deps.advanceCursor(cmdMsg.timestamp, cmdMsg.id);
-    return { handled: true, success: true };
+    return { handled: false };
   }
 
   // AUTHORIZED: process pre-compact messages first, then run the command

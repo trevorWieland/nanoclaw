@@ -24,8 +24,8 @@ const STDOUT_FILE = path.join(DATA_DIR, "remote-control.stdout");
 const STDERR_FILE = path.join(DATA_DIR, "remote-control.stderr");
 
 function saveState(session: RemoteControlSession): void {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify(session));
+  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(STATE_FILE, JSON.stringify(session), { mode: 0o600 });
 }
 
 function clearState(): void {
@@ -109,11 +109,19 @@ export async function startRemoteControl(
 
   // Redirect stdout/stderr to files so the process has no pipes to the parent.
   // This prevents SIGPIPE when NanoClaw restarts.
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const stdoutFd = fs.openSync(STDOUT_FILE, "w");
-  const stderrFd = fs.openSync(STDERR_FILE, "w");
-
+  // Use restrictive permissions (0o600) — these files may contain capability URLs.
+  let stdoutFd: number;
+  let stderrFd: number;
   let proc;
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+    stdoutFd = fs.openSync(STDOUT_FILE, "w", 0o600);
+    stderrFd = fs.openSync(STDERR_FILE, "w", 0o600);
+  } catch (err: any) {
+    startupInProgress = false;
+    return { ok: false, error: `Failed to set up files: ${err.message}` };
+  }
+
   try {
     proc = spawn("claude", ["remote-control", "--name", "NanoClaw Remote"], {
       cwd,

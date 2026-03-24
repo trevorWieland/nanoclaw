@@ -146,6 +146,7 @@ describe("remote-control", () => {
       expect(writeFileSyncSpy).toHaveBeenCalledWith(
         STATE_FILE,
         expect.stringContaining('"pid":99999'),
+        { mode: 0o600 },
       );
     });
 

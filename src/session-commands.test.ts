@@ -113,7 +113,7 @@ describe("handleSessionCommand", () => {
     expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
   });
 
-  it("sends denial to interactable sender in non-main group", async () => {
+  it("sends denial and returns handled:false for interactable sender in non-main group", async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({
       missedMessages: [makeMsg("/compact", { is_from_me: false })],
@@ -123,13 +123,15 @@ describe("handleSessionCommand", () => {
       timezone: "UTC",
       deps,
     });
-    expect(result).toEqual({ handled: true, success: true });
+    // Denied commands return handled:false so processing falls through to
+    // normal trigger path without advancing cursor (preserves prior messages).
+    expect(result).toEqual({ handled: false });
     expect(deps.sendMessage).toHaveBeenCalledWith("Session commands require admin access.");
     expect(deps.runAgent).not.toHaveBeenCalled();
-    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
-  it("silently consumes denied command when sender cannot interact", async () => {
+  it("returns handled:false without message when sender cannot interact", async () => {
     const deps = makeDeps({ canSenderInteract: vi.fn().mockReturnValue(false) });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg("/compact", { is_from_me: false })],
@@ -139,9 +141,9 @@ describe("handleSessionCommand", () => {
       timezone: "UTC",
       deps,
     });
-    expect(result).toEqual({ handled: true, success: true });
+    expect(result).toEqual({ handled: false });
     expect(deps.sendMessage).not.toHaveBeenCalled();
-    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
   });
 
   it("processes pre-compact messages before /compact", async () => {
