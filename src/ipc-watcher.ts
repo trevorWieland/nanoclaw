@@ -11,6 +11,10 @@ import { DATA_DIR, IPC_DEBOUNCE_MS, IPC_FALLBACK_POLL_INTERVAL } from "./config.
 import { processIpcFiles, type IpcDeps } from "./ipc.js";
 import { logger } from "./logger.js";
 
+// Maximum time (ms) a debounce burst can defer processing before we force a run.
+// Prevents starvation when fs.watch events arrive continuously.
+const DEBOUNCE_MAX_WAIT_MS = IPC_DEBOUNCE_MS * 5;
+
 export class IpcWatcher {
   private watcher: fs.FSWatcher | null = null;
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -19,6 +23,7 @@ export class IpcWatcher {
   private running = false;
   private processing = false;
   private pendingProcess = false;
+  private burstStart: number = 0;
   private readonly ipcBaseDir: string;
   private readonly deps: IpcDeps;
 
@@ -36,11 +41,15 @@ export class IpcWatcher {
 
     await mkdir(this.ipcBaseDir, { recursive: true });
 
+    // Guard against stop() called during the await above
+    if (!this.running) return;
+
     this.startFsWatcher();
 
-    // Safety-net fallback poll — catches dropped inotify events
+    // Safety-net fallback poll — catches dropped inotify events.
+    // Calls runProcess directly, bypassing debounce, so it cannot be starved.
     this.fallbackInterval = setInterval(() => {
-      this.scheduleProcess();
+      this.runProcess();
     }, IPC_FALLBACK_POLL_INTERVAL);
 
     // Initial process to pick up any files that arrived before the watcher started
@@ -95,15 +104,36 @@ export class IpcWatcher {
   private scheduleProcess(): void {
     if (!this.running) return;
 
+    const now = Date.now();
+
+    // Track when the current burst started
+    if (!this.burstStart) {
+      this.burstStart = now;
+    }
+
+    // If events have been deferring processing beyond the max-wait cap, fire immediately
+    if (now - this.burstStart >= DEBOUNCE_MAX_WAIT_MS) {
+      if (this.debounceTimer) {
+        clearTimeout(this.debounceTimer);
+        this.debounceTimer = null;
+      }
+      this.burstStart = 0;
+      this.runProcess();
+      return;
+    }
+
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
+      this.burstStart = 0;
       this.runProcess();
     }, IPC_DEBOUNCE_MS);
   }
 
   private async runProcess(): Promise<void> {
+    if (!this.running) return;
+
     // Prevent overlapping processing. If already processing, mark as pending
     // so we re-run after the current pass completes.
     if (this.processing) {

@@ -4,6 +4,7 @@ import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as ipcModule from "./ipc.js";
 import type { IpcDeps } from "./ipc.js";
 
 let mockDataDir = "";
@@ -116,16 +117,20 @@ describe("IpcWatcher", () => {
     expect(deps.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("debounces rapid file events into fewer process calls", async () => {
+  it("debounces rapid file events into fewer processIpcFiles calls", async () => {
+    const processSpy = vi.spyOn(ipcModule, "processIpcFiles");
     const deps = createDeps();
     const { IpcWatcher } = await import("./ipc-watcher.js");
     const watcher = new IpcWatcher(deps);
 
     try {
       await watcher.start();
+      // Wait for initial scan to complete, then reset spy
       await new Promise((r) => setTimeout(r, 300));
+      processSpy.mockClear();
       vi.mocked(deps.sendMessage).mockClear();
 
+      // Write 5 files in rapid succession
       for (let i = 0; i < 5; i++) {
         await writeIpcMessage("test-group", `msg${i}.json`, {
           type: "message",
@@ -134,10 +139,18 @@ describe("IpcWatcher", () => {
         });
       }
 
+      // Wait for debounce + processing
       await new Promise((r) => setTimeout(r, 400));
+
+      // All 5 messages should have been sent
       expect(deps.sendMessage).toHaveBeenCalledTimes(5);
+      // But processIpcFiles should have been called fewer times than 5
+      // (debounce coalesces multiple fs.watch events into fewer processing passes)
+      expect(processSpy.mock.calls.length).toBeLessThan(5);
+      expect(processSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
     } finally {
       watcher.stop();
+      processSpy.mockRestore();
     }
   });
 

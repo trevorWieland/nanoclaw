@@ -352,6 +352,7 @@ async function drainIpcInput(): Promise<string[]> {
 }
 
 const IPC_WAIT_DEBOUNCE_MS = 50;
+const IPC_WAIT_MAX_DEFER_MS = IPC_WAIT_DEBOUNCE_MS * 5;
 const IPC_WAIT_FALLBACK_MS = 2000;
 
 /**
@@ -365,6 +366,7 @@ function waitForIpcMessage(): Promise<string | null> {
     let watcher: fs.FSWatcher | null = null;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let burstStart = 0;
 
     const cleanup = () => {
       if (watcher) {
@@ -399,8 +401,26 @@ function waitForIpcMessage(): Promise<string | null> {
 
     const scheduleCheck = () => {
       if (resolved) return;
+
+      const now = Date.now();
+      if (!burstStart) burstStart = now;
+
+      // If events have been deferring check() beyond the max-wait cap, fire immediately
+      if (now - burstStart >= IPC_WAIT_MAX_DEFER_MS) {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        burstStart = 0;
+        check();
+        return;
+      }
+
       if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => check(), IPC_WAIT_DEBOUNCE_MS);
+      debounceTimer = setTimeout(() => {
+        burstStart = 0;
+        check();
+      }, IPC_WAIT_DEBOUNCE_MS);
     };
 
     // Set up fs.watch on the input directory
@@ -416,8 +436,8 @@ function waitForIpcMessage(): Promise<string | null> {
       // fs.watch failed to start; fallback polling handles it
     }
 
-    // Safety-net slow poll
-    fallbackTimer = setInterval(scheduleCheck, IPC_WAIT_FALLBACK_MS);
+    // Safety-net slow poll — calls check() directly, bypassing debounce
+    fallbackTimer = setInterval(() => check(), IPC_WAIT_FALLBACK_MS);
 
     // Initial check (files may have arrived before watcher was set up)
     check();
