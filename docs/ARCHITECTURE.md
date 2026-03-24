@@ -294,11 +294,12 @@ Tanren is an optional VM provisioning service for dispatching coding work to rem
 
 All paths are env-configurable for containerized deployment. When unset, they collapse to `PROJECT_ROOT`-relative defaults.
 
-| Root          | Env Var                | Default               | Purpose                              |
-| ------------- | ---------------------- | --------------------- | ------------------------------------ |
-| `APP_DIR`     | `NANOCLAW_APP_DIR`     | `process.cwd()`       | Immutable application code           |
-| `CONFIG_ROOT` | `NANOCLAW_CONFIG_ROOT` | `process.cwd()`       | Groups, allowlists, `.env`           |
-| `DATA_DIR`    | `NANOCLAW_DATA_DIR`    | `<PROJECT_ROOT>/data` | Sessions, database, cache, IPC, logs |
+| Root          | Env Var                | Default                | Purpose                    |
+| ------------- | ---------------------- | ---------------------- | -------------------------- |
+| `APP_DIR`     | `NANOCLAW_APP_DIR`     | `process.cwd()`        | Immutable application code |
+| `CONFIG_ROOT` | `NANOCLAW_CONFIG_ROOT` | `process.cwd()`        | Groups, allowlists, `.env` |
+| `DATA_DIR`    | `NANOCLAW_DATA_DIR`    | `<PROJECT_ROOT>/data`  | Sessions, cache, IPC, logs |
+| `STORE_DIR`   | `NANOCLAW_STORE_DIR`   | `<PROJECT_ROOT>/store` | SQLite database file       |
 
 ### Key Environment Variables
 
@@ -316,8 +317,6 @@ All paths are env-configurable for containerized deployment. When unset, they co
 | `CREDENTIAL_PROXY_PORT`         | `3001`            | Credential proxy listen port                             |
 | `STATUS_PORT`                   | `3002`            | Status server listen port                                |
 | `STATUS_BIND_HOST`              | `"127.0.0.1"`     | Status server bind address                               |
-| `POLL_INTERVAL`                 | `2000`            | Message polling interval (ms)                            |
-| `SCHEDULER_POLL_INTERVAL`       | `60000`           | Task scheduler check interval (ms)                       |
 | `IDLE_TIMEOUT`                  | `1800000` (30m)   | Container idle timeout after last output                 |
 | `TANREN_API_URL`                | (unset)           | Tanren API endpoint (enables integration)                |
 | `TANREN_API_KEY`                | (unset)           | Tanren API key                                           |
@@ -325,6 +324,8 @@ All paths are env-configurable for containerized deployment. When unset, they co
 | `CONTAINER_HOST_CONFIG_DIR`     | (unset)           | Host-side CONFIG_ROOT path (Docker-out-of-Docker)        |
 | `CONTAINER_HOST_DATA_DIR`       | (unset)           | Host-side DATA_DIR path (Docker-out-of-Docker)           |
 | `CREDENTIAL_PROXY_EXTERNAL_URL` | (unset)           | Override proxy URL for containers (Docker-out-of-Docker) |
+
+**Hard-coded constants** (not configurable via env): `POLL_INTERVAL` (2000ms message polling), `SCHEDULER_POLL_INTERVAL` (60000ms task check), `IPC_POLL_INTERVAL` (1000ms IPC scan), `MAX_PROMPT_MESSAGES` (200).
 
 ---
 
