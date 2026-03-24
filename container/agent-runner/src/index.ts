@@ -16,7 +16,12 @@
 
 import fs from "fs";
 import path from "path";
-import { query, HookCallback, PreCompactHookInput } from "@anthropic-ai/claude-agent-sdk";
+import {
+  query,
+  HookCallback,
+  McpServerConfig,
+  PreCompactHookInput,
+} from "@anthropic-ai/claude-agent-sdk";
 import { fileURLToPath } from "url";
 import { z } from "zod";
 
@@ -482,7 +487,7 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ["project", "user"],
       mcpServers: (() => {
-        const servers: Record<string, object> = {
+        const servers: Record<string, McpServerConfig> = {
           nanoclaw: {
             command: "node",
             args: [mcpServerPath],

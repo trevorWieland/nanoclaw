@@ -2,9 +2,13 @@
  * Config-driven remote MCP server registration.
  *
  * Loads MCP server definitions from mcp-servers.json (global and per-group),
- * resolves ${ENV_VAR} references from the host environment, and filters by
- * onlyMain. The resolved configs are passed to containers via ContainerInput
- * so agent-runner can register them with the Claude Agent SDK.
+ * resolves ${ENV_VAR} references from the host environment (global config only),
+ * and filters by onlyMain. The resolved configs are passed to containers via
+ * ContainerInput so agent-runner can register them with the Claude Agent SDK.
+ *
+ * Security: Per-group config files are container-writable, so ${ENV_VAR}
+ * interpolation is NOT applied to per-group entries. Only the global config
+ * (host-only, not container-writable) is trusted for env var resolution.
  */
 import fs from "fs";
 import path from "path";
@@ -25,6 +29,12 @@ const McpServerEntrySchema = z.object({
 });
 
 const McpServersFileSchema = z.record(z.string(), McpServerEntrySchema);
+
+/** Server names must be lowercase alphanumeric with hyphens/underscores. */
+const SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Names reserved for built-in MCP servers that must not be overridden. */
+const RESERVED_SERVER_NAMES = new Set(["nanoclaw", "tanren"]);
 
 type McpServerEntry = z.infer<typeof McpServerEntrySchema>;
 
@@ -101,11 +111,69 @@ function resolveServerEnvVars(name: string, entry: McpServerEntry): ResolvedMcpS
 function loadConfigFile(filePath: string): Record<string, McpServerEntry> | null {
   if (!fs.existsSync(filePath)) return null;
   const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  return McpServersFileSchema.parse(raw);
+  const parsed = McpServersFileSchema.parse(raw);
+
+  // Validate server names: safe characters only, no reserved names
+  for (const name of Object.keys(parsed)) {
+    if (!SERVER_NAME_PATTERN.test(name)) {
+      throw new Error(
+        `Invalid MCP server name "${name}" in ${filePath}: names must match /^[a-z0-9][a-z0-9_-]*$/`,
+      );
+    }
+    if (RESERVED_SERVER_NAMES.has(name)) {
+      throw new Error(
+        `Reserved MCP server name "${name}" in ${filePath}: "${name}" is a built-in server and cannot be overridden`,
+      );
+    }
+  }
+
+  return parsed;
+}
+
+/**
+ * Check if a string contains ${VAR} patterns.
+ * Uses a fresh regex to avoid global-flag lastIndex statefulness.
+ */
+function containsEnvVarRefs(value: string): boolean {
+  return /\$\{[^}]+\}/.test(value);
+}
+
+/**
+ * Reject a per-group entry if it contains ${VAR} patterns in url or headers.
+ * Per-group folders are container-writable, so interpolation is not trusted.
+ * Returns a ResolvedMcpServer with literal values, or null if refs found.
+ */
+function resolveGroupEntry(name: string, entry: McpServerEntry): ResolvedMcpServer | null {
+  const refs: string[] = [];
+  if (containsEnvVarRefs(entry.url)) refs.push("url");
+  if (entry.headers) {
+    for (const [key, value] of Object.entries(entry.headers)) {
+      if (containsEnvVarRefs(value)) refs.push(`headers.${key}`);
+    }
+  }
+
+  if (refs.length > 0) {
+    logger.error(
+      { server: name, fields: refs },
+      `Skipping per-group MCP server "${name}": environment variable references are not allowed in per-group configs (fields: ${refs.join(", ")})`,
+    );
+    return null;
+  }
+
+  return {
+    type: entry.type,
+    url: entry.url,
+    ...(entry.headers && { headers: { ...entry.headers } }),
+  };
 }
 
 /**
  * Load global + per-group MCP server configs, resolve env vars, filter by onlyMain.
+ *
+ * Security model:
+ * - Global config (CONFIG_ROOT/mcp-servers.json): trusted, ${VAR} interpolated
+ * - Per-group config (groups/{name}/mcp-servers.json): untrusted (container-writable),
+ *   ${VAR} patterns are rejected to prevent host env secret exfiltration
  *
  * @param configPath  Path to the global mcp-servers.json
  * @param groupFolder Group folder name (for per-group overrides)
@@ -117,21 +185,26 @@ export function loadMcpServers(
   groupFolder: string,
   isMain: boolean,
 ): Record<string, ResolvedMcpServer> | undefined {
-  const global = loadConfigFile(configPath) ?? {};
+  const globalEntries = loadConfigFile(configPath) ?? {};
+  const groupEntries = loadConfigFile(path.join(GROUPS_DIR, groupFolder, "mcp-servers.json")) ?? {};
 
-  const groupConfigPath = path.join(GROUPS_DIR, groupFolder, "mcp-servers.json");
-  const group = loadConfigFile(groupConfigPath) ?? {};
+  // Determine which names come from which source after merge.
+  // Group entries override same-named global entries.
+  const allNames = new Set([...Object.keys(globalEntries), ...Object.keys(groupEntries)]);
 
-  // Merge: group entries override same-named global entries
-  const merged = { ...global, ...group };
-
-  if (Object.keys(merged).length === 0) return undefined;
+  if (allNames.size === 0) return undefined;
 
   const resolved: Record<string, ResolvedMcpServer> = {};
-  for (const [name, entry] of Object.entries(merged)) {
+  for (const name of allNames) {
+    const isFromGroup = name in groupEntries;
+    const entry = isFromGroup ? groupEntries[name] : globalEntries[name];
+
     if (entry.onlyMain && !isMain) continue;
 
-    const server = resolveServerEnvVars(name, entry);
+    // Global entries: trusted, interpolate env vars
+    // Per-group entries: untrusted, reject env var refs
+    const server = isFromGroup ? resolveGroupEntry(name, entry) : resolveServerEnvVars(name, entry);
+
     if (server) {
       resolved[name] = server;
     }
