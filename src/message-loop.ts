@@ -14,6 +14,7 @@ import type { GroupQueue } from "./group-queue.js";
 import { logger } from "./logger.js";
 import { findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
+import { extractSessionCommand, isSessionCommandAllowed } from "./session-commands.js";
 import type { Channel, NewMessage, RegisteredGroup } from "./types.js";
 
 interface MessageLoopDeps {
@@ -25,7 +26,7 @@ interface MessageLoopDeps {
   lastTimestamp: () => string;
   setLastTimestamp: (ts: string) => void;
   saveState: () => Promise<void>;
-  queue: Pick<GroupQueue, "sendMessage" | "enqueueMessageCheck">;
+  queue: Pick<GroupQueue, "sendMessage" | "enqueueMessageCheck" | "closeStdin">;
 
   // DB
   getNewMessages: (
@@ -98,6 +99,28 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
+
+          // --- Session command interception (message loop) ---
+          // Find the first *authorized* session command in the batch.
+          // Scanning only the first command could miss an admin /compact that
+          // follows an untrusted one in the same poll batch.
+          const loopCmdMsg = groupMessages.find(
+            (m) =>
+              extractSessionCommand(m.content, TRIGGER_PATTERN) !== null &&
+              isSessionCommandAllowed(isMainGroup, m.is_from_me === true),
+          );
+
+          if (loopCmdMsg) {
+            // Close active container (no-ops when no container is active) and
+            // enqueue so processGroupMessages handles auth + cursor advancement.
+            // Don't pipe via IPC — slash commands need a fresh container with
+            // string prompt (not MessageStream) for SDK recognition.
+            deps.queue.closeStdin(chatJid);
+            deps.queue.enqueueMessageCheck(chatJid);
+            continue;
+          }
+          // --- End session command interception ---
+
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
           // For non-main groups, only act on trigger messages.

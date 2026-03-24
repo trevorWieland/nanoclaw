@@ -63,6 +63,7 @@ beforeEach(async () => {
     syncGroups: async () => {},
     getAvailableGroups: async () => [],
     writeGroupsSnapshot: () => {},
+    onTasksChanged: async () => {},
   };
 });
 

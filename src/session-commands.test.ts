@@ -1,0 +1,339 @@
+import { describe, it, expect, vi } from "vitest";
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+  isSessionCommandAllowed,
+} from "./session-commands.js";
+import type { NewMessage } from "./types.js";
+import type { SessionCommandDeps } from "./session-commands.js";
+
+describe("extractSessionCommand", () => {
+  const trigger = /^@Andy\b/i;
+
+  it("detects bare /compact", () => {
+    expect(extractSessionCommand("/compact", trigger)).toBe("/compact");
+  });
+
+  it("detects /compact with trigger prefix", () => {
+    expect(extractSessionCommand("@Andy /compact", trigger)).toBe("/compact");
+  });
+
+  it("rejects /compact with extra text", () => {
+    expect(extractSessionCommand("/compact now please", trigger)).toBeNull();
+  });
+
+  it("rejects partial matches", () => {
+    expect(extractSessionCommand("/compaction", trigger)).toBeNull();
+  });
+
+  it("rejects regular messages", () => {
+    expect(extractSessionCommand("please compact the conversation", trigger)).toBeNull();
+  });
+
+  it("handles whitespace", () => {
+    expect(extractSessionCommand("  /compact  ", trigger)).toBe("/compact");
+  });
+
+  it("is case-sensitive for the command", () => {
+    expect(extractSessionCommand("/Compact", trigger)).toBeNull();
+  });
+});
+
+describe("isSessionCommandAllowed", () => {
+  it("allows main group regardless of sender", () => {
+    expect(isSessionCommandAllowed(true, false)).toBe(true);
+  });
+
+  it("allows trusted/admin sender (is_from_me) in non-main group", () => {
+    expect(isSessionCommandAllowed(false, true)).toBe(true);
+  });
+
+  it("denies untrusted sender in non-main group", () => {
+    expect(isSessionCommandAllowed(false, false)).toBe(false);
+  });
+
+  it("allows trusted sender in main group", () => {
+    expect(isSessionCommandAllowed(true, true)).toBe(true);
+  });
+});
+
+function makeMsg(content: string, overrides: Partial<NewMessage> = {}): NewMessage {
+  return {
+    id: "msg-1",
+    chat_jid: "group@test",
+    sender: "user@test",
+    sender_name: "User",
+    content,
+    timestamp: "100",
+    ...overrides,
+  };
+}
+
+function makeDeps(overrides: Partial<SessionCommandDeps> = {}): SessionCommandDeps {
+  return {
+    sendMessage: vi.fn().mockResolvedValue(undefined),
+    setTyping: vi.fn().mockResolvedValue(undefined),
+    runAgent: vi.fn().mockResolvedValue("success"),
+    closeStdin: vi.fn(),
+    advanceCursor: vi.fn().mockResolvedValue(undefined),
+    formatMessages: vi.fn().mockReturnValue("<formatted>"),
+    canSenderInteract: vi.fn().mockReturnValue(true),
+    ...overrides,
+  };
+}
+
+const trigger = /^@Andy\b/i;
+
+describe("handleSessionCommand", () => {
+  it("returns handled:false when no session command found", async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("hello")],
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result.handled).toBe(false);
+  });
+
+  it("handles authorized /compact in main group", async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact")],
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
+    expect(deps.advanceCursor).toHaveBeenCalledWith("100", "msg-1");
+  });
+
+  it("sends denial and returns handled:false for interactable sender in non-main group", async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact", { is_from_me: false })],
+      isMainGroup: false,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    // Denied commands return handled:false so processing falls through to
+    // normal trigger path without advancing cursor (preserves prior messages).
+    expect(result).toEqual({ handled: false });
+    expect(deps.sendMessage).toHaveBeenCalledWith("Session commands require admin access.");
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+  });
+
+  it("returns handled:false without message when sender cannot interact", async () => {
+    const deps = makeDeps({ canSenderInteract: vi.fn().mockReturnValue(false) });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact", { is_from_me: false })],
+      isMainGroup: false,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: false });
+    expect(deps.sendMessage).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).not.toHaveBeenCalled();
+  });
+
+  it("skips unauthorized command and processes authorized one in same batch", async () => {
+    const deps = makeDeps();
+    const msgs = [
+      makeMsg("/compact", { id: "unauth", sender: "untrusted@test", is_from_me: false }),
+      makeMsg("/compact", { id: "auth", timestamp: "101", is_from_me: true }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: false,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    // Denial sent for first, then authorized command processed
+    expect(deps.sendMessage).toHaveBeenCalledWith("Session commands require admin access.");
+    expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
+    expect(deps.advanceCursor).toHaveBeenCalledWith("101", "auth");
+  });
+
+  it("processes pre-compact messages before /compact", async () => {
+    const deps = makeDeps();
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.formatMessages).toHaveBeenCalledWith([msgs[0]], "UTC");
+    // Two runAgent calls: pre-compact + /compact
+    expect(deps.runAgent).toHaveBeenCalledTimes(2);
+    expect(deps.runAgent).toHaveBeenCalledWith("<formatted>", expect.any(Function));
+    expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
+  });
+
+  it("allows is_from_me sender in non-main group", async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact", { is_from_me: true })],
+      isMainGroup: false,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.runAgent).toHaveBeenCalledWith("/compact", expect.any(Function));
+  });
+
+  it("reports failure when command-stage runAgent returns error without streamed status", async () => {
+    // runAgent resolves 'error' but callback never gets status: 'error'
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt, onOutput) => {
+        await onOutput({ status: "success", result: null });
+        return "error";
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact")],
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("failed"));
+  });
+
+  it("returns success:false on pre-compact failure with no output", async () => {
+    const deps = makeDeps({ runAgent: vi.fn().mockResolvedValue("error") });
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: false });
+    expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("Failed to process"));
+  });
+
+  it("pre-compact callback streams text and calls closeStdin on session-update marker", async () => {
+    let preCompactCallCount = 0;
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        if (preCompactCallCount === 0) {
+          preCompactCallCount++;
+          // Stream a text result, then session-update marker
+          await onOutput({ status: "success", result: "Here is the summary" });
+          await onOutput({ status: "success", result: null });
+          return "success";
+        }
+        // Command phase — just succeed
+        return "success";
+      }),
+    });
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith("Here is the summary");
+    expect(deps.closeStdin).toHaveBeenCalled();
+    expect(deps.runAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("pre-compact partial failure advances cursor when output was already sent", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        // Pre-compact: stream output then fail
+        await onOutput({ status: "success", result: "partial output" });
+        return "error";
+      }),
+    });
+    const msgs = [
+      makeMsg("summarize this", { timestamp: "99" }),
+      makeMsg("/compact", { timestamp: "100" }),
+    ];
+    const result = await handleSessionCommand({
+      missedMessages: msgs,
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith("partial output");
+    expect(deps.sendMessage).toHaveBeenCalledWith(expect.stringContaining("Failed to process"));
+    // Cursor advances to pre-compact msg timestamp, NOT the command timestamp
+    expect(deps.advanceCursor).toHaveBeenCalledWith("99", "msg-1");
+  });
+
+  it("handles object results via JSON.stringify in resultToText", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockImplementation(async (prompt: string, onOutput: any) => {
+        await onOutput({ status: "success", result: { key: "value" } });
+        return "success";
+      }),
+    });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg("/compact")],
+      isMainGroup: true,
+      groupName: "test",
+      triggerPattern: trigger,
+      timezone: "UTC",
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.sendMessage).toHaveBeenCalledWith('{"key":"value"}');
+  });
+
+  it("turns off typing even when runAgent throws", async () => {
+    const deps = makeDeps({
+      runAgent: vi.fn().mockRejectedValue(new Error("crash")),
+    });
+    await expect(
+      handleSessionCommand({
+        missedMessages: [makeMsg("/compact")],
+        isMainGroup: true,
+        groupName: "test",
+        triggerPattern: trigger,
+        timezone: "UTC",
+        deps,
+      }),
+    ).rejects.toThrow("crash");
+    expect(deps.setTyping).toHaveBeenCalledWith(false);
+  });
+});

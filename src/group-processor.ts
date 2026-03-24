@@ -19,6 +19,7 @@ import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { anchorTriggerWindow, findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
+import { handleSessionCommand } from "./session-commands.js";
 import {
   PartialSendError,
   type Channel,
@@ -218,6 +219,48 @@ export function createGroupProcessor(
       if (pendingTailDrain.delete(chatJid)) await deps.savePendingTailDrain();
       return true;
     }
+
+    // --- Session command interception (before trigger check) ---
+    const cmdResult = await handleSessionCommand({
+      missedMessages,
+      isMainGroup,
+      groupName: group.name,
+      triggerPattern: TRIGGER_PATTERN,
+      timezone: TIMEZONE,
+      deps: {
+        sendMessage: (text) => channel.sendMessage(chatJid, text),
+        setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+        runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
+        closeStdin: () => deps.queue.closeStdin(chatJid),
+        advanceCursor: async (ts, id) => {
+          deps.setLastAgentTimestamp(chatJid, { ts, id });
+          await deps.saveState();
+        },
+        formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
+        canSenderInteract: (msg) => {
+          const hasTrigger = TRIGGER_PATTERN.test(msg.content.trim());
+          const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
+          return (
+            isMainGroup ||
+            !reqTrigger ||
+            (hasTrigger &&
+              (msg.is_from_me || isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+          );
+        },
+      },
+    });
+    if (cmdResult.handled) {
+      // Always re-enqueue on success. The global "seen" cursor already
+      // advanced past the batch, so getNewMessages won't return remaining
+      // messages — the queue is the only way to pick up trailing work,
+      // active tail-drains, or commands left pending after partial failures.
+      // On failure, the queue's retry backoff handles re-processing.
+      if (cmdResult.success) {
+        deps.queue.enqueueMessageCheck(chatJid);
+      }
+      return cmdResult.success;
+    }
+    // --- End session command interception ---
 
     // Whether the trigger window was truncated (tail messages still need processing).
     // Only set for non-main groups with trigger requirements.

@@ -129,19 +129,7 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 5. Install Skills Marketplace
-
-Register and install the NanoClaw skills marketplace plugin so all feature skills (channel integrations, add-ons) are available:
-
-```bash
-claude plugin marketplace add qwibitai/nanoclaw-skills
-claude plugin marketplace update nanoclaw-skills
-claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
-```
-
-The marketplace update ensures the local cache is fresh before installing. This is hot-loaded — no restart needed. All feature skills become immediately available.
-
-## 6. Set Up Channels
+## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 
@@ -173,16 +161,16 @@ Each skill will:
 pnpm install && pnpm run build
 ```
 
-If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 7.
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
 
-## 7. Mount Allowlist
+## 6. Mount Allowlist
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
-## 8. Start Service
+## 7. Start Service
 
 If service already running: unload first.
 
@@ -216,7 +204,7 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 9. Verify
+## 8. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
@@ -226,14 +214,14 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 - SERVICE=not_found → re-run step 8
 - CREDENTIALS=missing → re-run step 4
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
-- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 6
+- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 8), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
@@ -242,3 +230,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 **Channel not connecting:** Verify the channel's credentials are set in `.env`. Channels auto-enable when their credentials are present. For WhatsApp: check `store/auth/creds.json` exists. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
+
+## Diagnostics
+
+Read and follow [diagnostics.md](diagnostics.md).

@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
   <a href="README.md">English</a>&nbsp; • &nbsp;
+  <a href="README_ja.md">日本語</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>
 </p>
 通过 Claude Code，NanoClaw 可以动态重写自身代码，根据您的需求定制功能。

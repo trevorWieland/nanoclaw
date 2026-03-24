@@ -120,12 +120,50 @@ If a merge fails badly (e.g., cannot resolve conflicts):
 - Tell the user this skill could not be auto-updated and they should resolve it manually.
 - Continue with the remaining skills.
 
+# Step 3.5: Post-merge cleanup
+
+After all selected skill merges complete, run these cleanup steps before validation.
+
+## Detect stray files
+
+Skill branches are forked from main at a point in time. They may carry files from other skills or features that were present when the branch was created but are unrelated to the skill itself (e.g., a Telegram channel file in a `skill/compact` branch).
+
+After merge, check for unexpected files:
+
+- Compare `git diff --name-only` against the expected scope of the skill (its SKILL.md description and purpose).
+- Files outside the skill's domain (e.g., channel implementations, unrelated config) are likely stray.
+
+If stray files are found:
+
+- List them and use AskUserQuestion: "These files were introduced by the skill branch but appear unrelated to the skill. Remove them?"
+  - Option: "Yes, remove them"
+  - Option: "No, keep them"
+- If yes: `git rm <files>` and commit the removal.
+
+## Install dependencies
+
+If `package.json` was modified by any skill merge, run `pnpm install` (or `npm install`).
+
+## Format and stage
+
+Run the project formatter to normalize any style drift:
+
+- `pnpm run format:fix`
+- If files changed: `git add -A && git commit -m "style: format after skill merge"`
+
+## Flag tooling conflicts
+
+Check if any skill merge introduced config files that conflict with local tooling:
+
+- `git diff --name-only | grep -E '(\.eslintrc|eslint\.config|\.prettierrc|prettier\.config|package-lock\.json)'`
+- If matches found, warn and ask the user (same as update-nanoclaw).
+
 # Step 4: Validation
 
 After all selected skills are merged:
 
 - `pnpm run build`
-- `pnpm test` (do not fail the flow if tests are not configured)
+- If a `test:coverage` script exists in package.json, use `pnpm run test:coverage` instead of `pnpm test` to validate that coverage thresholds are still met after the merge. (Do not fail the flow if tests are not configured.)
 
 If build fails:
 

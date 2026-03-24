@@ -43,6 +43,7 @@ import { createGroupProcessor } from "./group-processor.js";
 import { startIpcWatcher } from "./ipc.js";
 import { startMessageLoop } from "./message-loop.js";
 import { recoverPendingMessages } from "./recovery.js";
+import { restoreRemoteControl, startRemoteControl, stopRemoteControl } from "./remote-control.js";
 import { findChannel, formatOutbound } from "./router.js";
 import { isSenderAllowed, loadSenderAllowlist, shouldDropMessage } from "./sender-allowlist.js";
 import { syncProjectMeta } from "./project-meta.js";
@@ -199,6 +200,7 @@ async function main(): Promise<void> {
   logger.info("Database initialized");
   await loadState();
   syncProjectMeta();
+  restoreRemoteControl();
 
   // Declarative group registration (for container deployments via registered-groups.json)
   for (const { jid, group } of loadDeclarativeGroups()) {
@@ -256,10 +258,55 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
+  // Handle /remote-control and /remote-control-end commands
+  async function handleRemoteControl(
+    command: string,
+    chatJid: string,
+    msg: NewMessage,
+  ): Promise<void> {
+    const group = registeredGroups[chatJid];
+    // Remote control grants host-level code access — require is_from_me (the
+    // strictest admin signal). Channels where is_from_me is always false (Discord,
+    // Slack) effectively disable RC until the user configures explicit sender
+    // allowlist entries with specific senders (not wildcard "*").
+    // We accept allowlisted senders only when the list is non-default (not "*").
+    const cfg = loadSenderAllowlist();
+    const entry = cfg.chats[chatJid] ?? cfg.default;
+    const hasExplicitAllowlist = entry.allow !== "*";
+    const isAdmin =
+      msg.is_from_me || (hasExplicitAllowlist && isSenderAllowed(chatJid, msg.sender, cfg));
+    if (!group?.isMain || !isAdmin) {
+      logger.warn(
+        { chatJid, sender: msg.sender },
+        "Remote control rejected: not main group or not admin",
+      );
+      return;
+    }
+
+    const channel = findChannel(channels, chatJid);
+    if (!channel) return;
+
+    if (command === "/remote-control") {
+      const result = await startRemoteControl(msg.sender, chatJid, process.cwd());
+      if (result.ok) {
+        await channel.sendMessage(chatJid, result.url);
+      } else {
+        await channel.sendMessage(chatJid, `Remote Control failed: ${result.error}`);
+      }
+    } else {
+      const result = stopRemoteControl();
+      if (result.ok) {
+        await channel.sendMessage(chatJid, "Remote Control session ended.");
+      } else {
+        await channel.sendMessage(chatJid, result.error);
+      }
+    }
+  }
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
     onMessage: async (chatJid: string, msg: NewMessage) => {
-      // Sender allowlist drop mode: discard messages from denied senders before storing
+      // Sender allowlist drop mode: discard messages from denied senders before any processing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
         const cfg = loadSenderAllowlist();
         if (shouldDropMessage(chatJid, cfg) && !isSenderAllowed(chatJid, msg.sender, cfg)) {
@@ -272,6 +319,16 @@ async function main(): Promise<void> {
           return;
         }
       }
+
+      // Remote control commands — intercept before storage
+      const trimmed = msg.content.trim();
+      if (trimmed === "/remote-control" || trimmed === "/remote-control-end") {
+        handleRemoteControl(trimmed, chatJid, msg).catch((err) =>
+          logger.error({ err, chatJid }, "Remote control command error"),
+        );
+        return;
+      }
+
       await storeMessage(msg);
     },
     onChatMetadata: async (
@@ -401,7 +458,26 @@ async function main(): Promise<void> {
       await Promise.all(channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)));
     },
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag) => writeGroupsSnapshot(gf, im, ag),
+    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    onTasksChanged: async () => {
+      try {
+        const tasks = await getAllTasks();
+        const taskRows = tasks.map((t) => ({
+          id: t.id,
+          groupFolder: t.group_folder,
+          prompt: t.prompt,
+          schedule_type: t.schedule_type,
+          schedule_value: t.schedule_value,
+          status: t.status,
+          next_run: t.next_run,
+        }));
+        for (const group of Object.values(registeredGroups)) {
+          writeTasksSnapshot(group.folder, group.isMain === true, taskRows);
+        }
+      } catch (err) {
+        logger.error({ err }, "Failed to update task snapshots");
+      }
+    },
   });
   queue.setProcessMessagesFn(processGroupMessages);
   queue.onRetriesExhausted = async (groupJid: string) => {

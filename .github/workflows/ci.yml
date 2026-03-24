@@ -21,3 +21,6 @@ jobs:
 
       - name: Dead code check
         run: pnpm run knip
+
+      - name: Coverage enforcement
+        run: pnpm run test:coverage

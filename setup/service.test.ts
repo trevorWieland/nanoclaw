@@ -70,6 +70,7 @@ function generateSystemdUnit(
   unitLines.push(`WorkingDirectory=${projectRoot}`);
   unitLines.push("Restart=always");
   unitLines.push("RestartSec=5");
+  unitLines.push("KillMode=process");
   unitLines.push(`Environment=HOME=${homeDir}`);
   unitLines.push(`Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`);
   unitLines.push(`StandardOutput=append:${projectRoot}/logs/nanoclaw.log`);
@@ -157,6 +158,11 @@ describe("systemd unit generation", () => {
       true,
     );
     expect(unit).not.toContain("ExecStartPre=");
+  });
+
+  it("uses KillMode=process to preserve detached children", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", false);
+    expect(unit).toContain("KillMode=process");
   });
 });
 
