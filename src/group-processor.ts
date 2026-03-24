@@ -19,7 +19,7 @@ import { decideCursorAction } from "./message-processing.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
 import { anchorTriggerWindow, findChannel, formatMessagesWithCap } from "./router.js";
 import { isTriggerAllowed, loadSenderAllowlist } from "./sender-allowlist.js";
-import { extractSessionCommand, handleSessionCommand } from "./session-commands.js";
+import { handleSessionCommand } from "./session-commands.js";
 import {
   PartialSendError,
   type Channel,
@@ -250,22 +250,13 @@ export function createGroupProcessor(
       },
     });
     if (cmdResult.handled) {
-      // Re-enqueue on success when there are trailing messages or an active
-      // tail-drain. The global "seen" cursor already advanced past the batch,
-      // so getNewMessages won't return them again — the queue is the only way
-      // to pick up remaining work. Always re-enqueue when tail-drain is active
-      // because the poll guard (message-loop.ts:143) skips groups with pending
-      // tail-drain entries, so without a queue-driven run the group stalls.
-      // On failure, let the queue's retry backoff handle re-processing.
+      // Always re-enqueue on success. The global "seen" cursor already
+      // advanced past the batch, so getNewMessages won't return remaining
+      // messages — the queue is the only way to pick up trailing work,
+      // active tail-drains, or commands left pending after partial failures.
+      // On failure, the queue's retry backoff handles re-processing.
       if (cmdResult.success) {
-        const hasTailDrain = pendingTailDrain.has(chatJid);
-        const cmdIdx = missedMessages.findIndex(
-          (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
-        );
-        const hasTrailingMessages = cmdIdx >= 0 && cmdIdx < missedMessages.length - 1;
-        if (hasTrailingMessages || hasTailDrain) {
-          deps.queue.enqueueMessageCheck(chatJid);
-        }
+        deps.queue.enqueueMessageCheck(chatJid);
       }
       return cmdResult.success;
     }
