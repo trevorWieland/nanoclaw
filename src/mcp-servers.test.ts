@@ -8,8 +8,13 @@ vi.mock("./config.js", () => ({
   GROUPS_DIR: "/config/groups",
 }));
 
+vi.mock("./env.js", () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
 import fs from "fs";
 import { interpolateEnvVars, loadMcpServers } from "./mcp-servers.js";
+import { readEnvFile } from "./env.js";
 import { logger } from "./logger.js";
 
 vi.mock("fs");
@@ -84,12 +89,17 @@ describe("interpolateEnvVars", () => {
 // loadMcpServers
 // =========================================
 
+const regularFileStat = { isFile: () => true, size: 256 };
+
 describe("loadMcpServers", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
     vi.clearAllMocks();
+    // Default: lstatSync returns a regular file with small size
+    vi.mocked(fs.lstatSync).mockReturnValue(regularFileStat as any);
+    vi.mocked(readEnvFile).mockReturnValue({});
   });
 
   afterEach(() => {
@@ -395,5 +405,72 @@ describe("loadMcpServers", () => {
     expect(result).toEqual({
       constructor: { type: "http", url: "http://example.com/val" },
     });
+  });
+
+  // --- .env file resolution ---
+
+  it("resolves env vars from .env file when not in process.env", () => {
+    delete process.env.DOT_ENV_SECRET;
+    vi.mocked(readEnvFile).mockReturnValue({ DOT_ENV_SECRET: "from-dotenv" });
+    const config = {
+      myserver: {
+        type: "http",
+        url: "http://example.com/mcp",
+        headers: { Authorization: "Bearer ${DOT_ENV_SECRET}" },
+      },
+    };
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/config/mcp-servers.json");
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(config));
+
+    const result = loadMcpServers("/config/mcp-servers.json", "test-group", true);
+    expect(result).toEqual({
+      myserver: {
+        type: "http",
+        url: "http://example.com/mcp",
+        headers: { Authorization: "Bearer from-dotenv" },
+      },
+    });
+    expect(readEnvFile).toHaveBeenCalledWith(["DOT_ENV_SECRET"]);
+  });
+
+  it("process.env takes precedence over .env file", () => {
+    process.env.MY_KEY = "from-process-env";
+    vi.mocked(readEnvFile).mockReturnValue({ MY_KEY: "from-dotenv" });
+    const config = {
+      myserver: { type: "http", url: "http://example.com/${MY_KEY}" },
+    };
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/config/mcp-servers.json");
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(config));
+
+    const result = loadMcpServers("/config/mcp-servers.json", "test-group", true);
+    expect(result).toEqual({
+      myserver: { type: "http", url: "http://example.com/from-process-env" },
+    });
+  });
+
+  // --- Symlink/size guards ---
+
+  it("skips symlink config files", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/config/mcp-servers.json");
+    vi.mocked(fs.lstatSync).mockReturnValue({ isFile: () => false, size: 100 } as any);
+
+    const result = loadMcpServers("/config/mcp-servers.json", "test-group", true);
+    expect(result).toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "/config/mcp-servers.json" }),
+      expect.stringContaining("not a regular file"),
+    );
+  });
+
+  it("skips oversized config files", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === "/config/mcp-servers.json");
+    vi.mocked(fs.lstatSync).mockReturnValue({ isFile: () => true, size: 100_000 } as any);
+
+    const result = loadMcpServers("/config/mcp-servers.json", "test-group", true);
+    expect(result).toBeUndefined();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: "/config/mcp-servers.json" }),
+      expect.stringContaining("exceeds size limit"),
+    );
   });
 });
