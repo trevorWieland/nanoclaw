@@ -265,11 +265,16 @@ async function main(): Promise<void> {
     msg: NewMessage,
   ): Promise<void> {
     const group = registeredGroups[chatJid];
-    // Admin check: is_from_me works for WhatsApp self-chat, but channels like
-    // Discord/Slack emit all human messages with is_from_me: false. Fall back to
-    // the sender allowlist — if the sender is explicitly allowed for this group,
-    // they're trusted enough for remote control.
-    const isAdmin = msg.is_from_me || isSenderAllowed(chatJid, msg.sender, loadSenderAllowlist());
+    // Remote control grants host-level code access — require is_from_me (the
+    // strictest admin signal). Channels where is_from_me is always false (Discord,
+    // Slack) effectively disable RC until the user configures explicit sender
+    // allowlist entries with specific senders (not wildcard "*").
+    // We accept allowlisted senders only when the list is non-default (not "*").
+    const cfg = loadSenderAllowlist();
+    const entry = cfg.chats[chatJid] ?? cfg.default;
+    const hasExplicitAllowlist = entry.allow !== "*";
+    const isAdmin =
+      msg.is_from_me || (hasExplicitAllowlist && isSenderAllowed(chatJid, msg.sender, cfg));
     if (!group?.isMain || !isAdmin) {
       logger.warn(
         { chatJid, sender: msg.sender },

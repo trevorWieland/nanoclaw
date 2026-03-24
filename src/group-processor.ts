@@ -250,11 +250,12 @@ export function createGroupProcessor(
       },
     });
     if (cmdResult.handled) {
-      // Session command consumed the batch. Clean up any pending tail-drain
-      // so the message-loop poll guard doesn't block this group.
-      if (pendingTailDrain.delete(chatJid)) {
-        await deps.savePendingTailDrain();
-      }
+      // Preserve any pending tail-drain entry — the re-enqueue below will
+      // force processGroupMessages via the queue (bypassing the poll guard),
+      // and the tail-drain cutoff is needed so remaining backlog messages
+      // skip trigger gating. Clearing it here would cause those messages to
+      // fall back to trigger requirements and potentially be skipped.
+
       // If the command succeeded and there are messages after it in the batch,
       // re-enqueue so they get processed. The global "seen" cursor already
       // advanced past the entire batch, so getNewMessages won't return them.
