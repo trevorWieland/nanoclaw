@@ -123,25 +123,50 @@ const MAX_CONFIG_FILE_SIZE = 65536;
  * and enforce a size limit to prevent host-side resource exhaustion.
  */
 function loadConfigFile(filePath: string): Record<string, McpServerEntry> | null {
-  if (!fs.existsSync(filePath)) return null;
-
-  // Guard against symlinks to special files (e.g. /dev/zero) and oversized files.
+  // Open once with O_NOFOLLOW | O_NONBLOCK so the kernel rejects symlinks
+  // atomically and doesn't block on FIFOs or other special files.
+  // Then fstat + read on the same fd to eliminate the TOCTOU window.
   // Per-group folders are container-writable, so these paths are untrusted.
-  const stat = fs.lstatSync(filePath);
-  if (!stat.isFile()) {
-    logger.error({ filePath }, "MCP config is not a regular file, skipping");
-    return null;
-  }
-  if (stat.size > MAX_CONFIG_FILE_SIZE) {
-    logger.error(
-      { filePath, size: stat.size, maxSize: MAX_CONFIG_FILE_SIZE },
-      "MCP config file exceeds size limit, skipping",
+  let fd: number;
+  try {
+    fd = fs.openSync(
+      filePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
     );
-    return null;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    if (code === "ELOOP") {
+      logger.error({ filePath }, "MCP config is a symlink, skipping");
+      return null;
+    }
+    throw err;
   }
 
-  const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  const parsed = McpServersFileSchema.parse(raw);
+  let parsed: Record<string, McpServerEntry>;
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      logger.error({ filePath }, "MCP config is not a regular file, skipping");
+      return null;
+    }
+    if (stat.size > MAX_CONFIG_FILE_SIZE) {
+      logger.error(
+        { filePath, size: stat.size, maxSize: MAX_CONFIG_FILE_SIZE },
+        "MCP config file exceeds size limit, skipping",
+      );
+      return null;
+    }
+
+    // Read exactly the validated byte count to prevent a concurrent writer
+    // from appending past the size limit between fstat and read.
+    const buf = Buffer.alloc(stat.size);
+    const bytesRead = fs.readSync(fd, buf, 0, stat.size, 0);
+    const raw = JSON.parse(buf.subarray(0, bytesRead).toString("utf-8"));
+    parsed = McpServersFileSchema.parse(raw);
+  } finally {
+    fs.closeSync(fd);
+  }
 
   // Validate server names: safe characters only, no reserved names
   for (const name of Object.keys(parsed)) {

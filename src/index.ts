@@ -46,7 +46,7 @@ import {
 import { GroupQueue } from "./group-queue.js";
 import { resolveGroupFolderPath } from "./group-folder.js";
 import { createGroupProcessor } from "./group-processor.js";
-import { startIpcWatcher } from "./ipc.js";
+import { IpcWatcher } from "./ipc-watcher.js";
 import { loadMcpServers } from "./mcp-servers.js";
 import { startMessageLoop } from "./message-loop.js";
 import { recoverPendingMessages } from "./recovery.js";
@@ -253,9 +253,13 @@ async function main(): Promise<void> {
     getRecentEvents: () => getRecentEvents(),
   });
 
+  // Declared here so shutdown handler can reference it; assigned when subsystems start.
+  let ipcWatcher: IpcWatcher;
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, "Shutdown signal received");
+    ipcWatcher?.stop();
     proxyServer.close();
     statusServer.close();
     await queue.shutdown();
@@ -458,7 +462,7 @@ async function main(): Promise<void> {
       loadMcpServers(MCP_SERVERS_CONFIG_PATH, groupFolder, isMain),
     runAgent: runContainerAgent,
   });
-  startIpcWatcher({
+  ipcWatcher = new IpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -491,6 +495,7 @@ async function main(): Promise<void> {
       }
     },
   });
+  await ipcWatcher.start();
   queue.setProcessMessagesFn(processGroupMessages);
   queue.onRetriesExhausted = async (groupJid: string) => {
     if (pendingTailDrain.delete(groupJid)) {

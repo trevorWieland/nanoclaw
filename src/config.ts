@@ -103,7 +103,8 @@ export const CREDENTIAL_PROXY_PORT = parseIntEnv("CREDENTIAL_PROXY_PORT", 3001);
 export const STATUS_PORT = parseIntEnv("STATUS_PORT", 3002);
 export const STATUS_BIND_HOST =
   process.env.STATUS_BIND_HOST || envConfig.STATUS_BIND_HOST || "127.0.0.1";
-export const IPC_POLL_INTERVAL = 1000;
+export const IPC_DEBOUNCE_MS = 100;
+export const IPC_FALLBACK_POLL_INTERVAL = 5000;
 export const IDLE_TIMEOUT = parseIntEnv("IDLE_TIMEOUT", 1800000); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseIntEnv("MAX_CONCURRENT_CONTAINERS", 5));
 export const MAX_PROMPT_MESSAGES = 200;

@@ -15,6 +15,7 @@
  */
 
 import fs from "fs";
+import { access, mkdir, readdir, readFile, unlink } from "fs/promises";
 import path from "path";
 import {
   query,
@@ -297,36 +298,35 @@ function formatTranscriptMarkdown(
 /**
  * Check for _close sentinel.
  */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
+async function shouldClose(): Promise<boolean> {
+  try {
+    await access(IPC_INPUT_CLOSE_SENTINEL);
     try {
-      fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+      await unlink(IPC_INPUT_CLOSE_SENTINEL);
     } catch {
       /* ignore */
     }
     return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+async function drainIpcInput(): Promise<string[]> {
   try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs
-      .readdirSync(IPC_INPUT_DIR)
-      .filter((f) => f.endsWith(".json"))
-      .sort();
+    await mkdir(IPC_INPUT_DIR, { recursive: true });
+    const files = (await readdir(IPC_INPUT_DIR)).filter((f) => f.endsWith(".json")).sort();
 
     const messages: string[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        fs.unlinkSync(filePath);
+        const raw = JSON.parse(await readFile(filePath, "utf-8"));
+        await unlink(filePath);
         const parsed = FollowUpMessageSchema.safeParse(raw);
         if (parsed.success) {
           messages.push(parsed.data.text);
@@ -338,7 +338,7 @@ function drainIpcInput(): string[] {
           `Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`,
         );
         try {
-          fs.unlinkSync(filePath);
+          await unlink(filePath);
         } catch {
           /* ignore */
         }
@@ -351,25 +351,102 @@ function drainIpcInput(): string[] {
   }
 }
 
+const IPC_WAIT_DEBOUNCE_MS = 50;
+const IPC_WAIT_MAX_DEFER_MS = IPC_WAIT_DEBOUNCE_MS * 5;
+const IPC_WAIT_FALLBACK_MS = 2000;
+
 /**
  * Wait for a new IPC message or _close sentinel.
+ * Uses fs.watch for immediate notification with a slow-poll fallback.
  * Returns the messages as a single string, or null if _close.
  */
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
+    let resolved = false;
+    let checking = false;
+    let watcher: fs.FSWatcher | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let burstStart = 0;
+
+    const cleanup = () => {
+      if (watcher) {
+        watcher.close();
+        watcher = null;
       }
-      const messages = drainIpcInput();
-      if (messages.length > 0) {
-        resolve(messages.join("\n"));
-        return;
+      if (fallbackTimer) {
+        clearInterval(fallbackTimer);
+        fallbackTimer = null;
       }
-      setTimeout(poll, IPC_POLL_MS);
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
     };
-    poll();
+
+    const check = async () => {
+      if (resolved || checking) return;
+      checking = true;
+      try {
+        if (await shouldClose()) {
+          resolved = true;
+          cleanup();
+          resolve(null);
+          return;
+        }
+        const messages = await drainIpcInput();
+        if (messages.length > 0) {
+          resolved = true;
+          cleanup();
+          resolve(messages.join("\n"));
+        }
+      } finally {
+        checking = false;
+      }
+    };
+
+    const scheduleCheck = () => {
+      if (resolved) return;
+
+      const now = Date.now();
+      if (!burstStart) burstStart = now;
+
+      // If events have been deferring check() beyond the max-wait cap, fire immediately
+      if (now - burstStart >= IPC_WAIT_MAX_DEFER_MS) {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        burstStart = 0;
+        check();
+        return;
+      }
+
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        burstStart = 0;
+        check();
+      }, IPC_WAIT_DEBOUNCE_MS);
+    };
+
+    // Set up fs.watch on the input directory
+    try {
+      watcher = fs.watch(IPC_INPUT_DIR, () => {
+        scheduleCheck();
+      });
+      watcher.on("error", () => {
+        watcher = null;
+        // Fallback interval continues to handle it
+      });
+    } catch {
+      // fs.watch failed to start; fallback polling handles it
+    }
+
+    // Safety-net slow poll — calls check() directly, bypassing debounce
+    fallbackTimer = setInterval(() => check(), IPC_WAIT_FALLBACK_MS);
+
+    // Initial check (files may have arrived before watcher was set up)
+    check();
   });
 }
 
@@ -391,26 +468,53 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC for follow-up messages and _close sentinel during the query.
+  // Re-check ipcPolling after each await to avoid pushing into a finished stream.
   let ipcPolling = true;
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
+  let inflightPoll: Promise<void> | null = null;
+  const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
-    if (shouldClose()) {
+    if (await shouldClose()) {
+      // Always honour _close — the sentinel was already consumed from disk.
+      // Even if the query finished during the await, closedDuringQuery must
+      // be set so the outer loop exits instead of waiting for a new signal.
       log("Close sentinel detected during query, ending stream");
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
       return;
     }
-    const messages = drainIpcInput();
+    if (!ipcPolling) return;
+    const messages = await drainIpcInput();
+    if (!ipcPolling) {
+      // Query finished while we were draining. These messages were already
+      // unlinked — re-write them so the next waitForIpcMessage picks them up.
+      for (const text of messages) {
+        const file = path.join(
+          IPC_INPUT_DIR,
+          `rescued-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`,
+        );
+        try {
+          fs.writeFileSync(file, JSON.stringify({ type: "message", text }));
+        } catch {
+          log(`Failed to rescue IPC message (${text.length} chars)`);
+        }
+      }
+      return;
+    }
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
     }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+    if (ipcPolling) {
+      setTimeout(startPoll, IPC_POLL_MS);
+    }
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  const startPoll = () => {
+    inflightPoll = pollIpcDuringQuery();
+  };
+  setTimeout(startPoll, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -559,6 +663,20 @@ async function runQuery(
   }
 
   ipcPolling = false;
+
+  // Wait for any in-flight async poll callback to finish. It may still be
+  // inside await shouldClose/drainIpcInput and could update closedDuringQuery.
+  if (inflightPoll) {
+    await inflightPoll;
+  }
+
+  // Also re-check the sentinel directly in case _close arrived after the last poll
+  // but before we stopped polling — avoids a missed shutdown.
+  if (!closedDuringQuery && (await shouldClose())) {
+    log("Close sentinel found after query completion");
+    closedDuringQuery = true;
+  }
+
   log(
     `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || "none"}, closedDuringQuery: ${closedDuringQuery}`,
   );
@@ -599,11 +717,11 @@ async function main(): Promise<void> {
   }
 
   let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+  await mkdir(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
   try {
-    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+    await unlink(IPC_INPUT_CLOSE_SENTINEL);
   } catch {
     /* ignore */
   }
@@ -622,7 +740,7 @@ async function main(): Promise<void> {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
   if (!isSessionSlashCommand) {
-    const pending = drainIpcInput();
+    const pending = await drainIpcInput();
     if (pending.length > 0) {
       log(`Draining ${pending.length} pending IPC messages into initial prompt`);
       prompt += "\n" + pending.join("\n");
