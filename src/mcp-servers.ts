@@ -123,25 +123,44 @@ const MAX_CONFIG_FILE_SIZE = 65536;
  * and enforce a size limit to prevent host-side resource exhaustion.
  */
 function loadConfigFile(filePath: string): Record<string, McpServerEntry> | null {
-  if (!fs.existsSync(filePath)) return null;
-
-  // Guard against symlinks to special files (e.g. /dev/zero) and oversized files.
-  // Per-group folders are container-writable, so these paths are untrusted.
-  const stat = fs.lstatSync(filePath);
-  if (!stat.isFile()) {
-    logger.error({ filePath }, "MCP config is not a regular file, skipping");
-    return null;
+  // Open once with O_NOFOLLOW so the kernel rejects symlinks atomically.
+  // Then fstat + read on the same fd to eliminate the TOCTOU window between
+  // validation and read. Per-group folders are container-writable, so these
+  // paths are untrusted — a container could race-replace the file between a
+  // separate stat and read.
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    if (code === "ELOOP") {
+      logger.error({ filePath }, "MCP config is a symlink, skipping");
+      return null;
+    }
+    throw err;
   }
-  if (stat.size > MAX_CONFIG_FILE_SIZE) {
-    logger.error(
-      { filePath, size: stat.size, maxSize: MAX_CONFIG_FILE_SIZE },
-      "MCP config file exceeds size limit, skipping",
-    );
-    return null;
-  }
 
-  const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-  const parsed = McpServersFileSchema.parse(raw);
+  let parsed: Record<string, McpServerEntry>;
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      logger.error({ filePath }, "MCP config is not a regular file, skipping");
+      return null;
+    }
+    if (stat.size > MAX_CONFIG_FILE_SIZE) {
+      logger.error(
+        { filePath, size: stat.size, maxSize: MAX_CONFIG_FILE_SIZE },
+        "MCP config file exceeds size limit, skipping",
+      );
+      return null;
+    }
+
+    const raw = JSON.parse(fs.readFileSync(fd, "utf-8"));
+    parsed = McpServersFileSchema.parse(raw);
+  } finally {
+    fs.closeSync(fd);
+  }
 
   // Validate server names: safe characters only, no reserved names
   for (const name of Object.keys(parsed)) {
