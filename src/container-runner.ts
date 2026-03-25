@@ -657,9 +657,28 @@ export async function runContainerAgent(
         // persisting user conversation content on every non-zero exit.
         if (isVerbose) {
           // Redact secrets before writing to log files
-          const redactedInput = input.tanren
-            ? { ...input, tanren: { ...input.tanren, apiKey: "[REDACTED]" } }
-            : input;
+          let redactedInput: Record<string, unknown> = { ...input };
+          if (input.tanren) {
+            redactedInput = { ...redactedInput, tanren: { ...input.tanren, apiKey: "[REDACTED]" } };
+          }
+          if (input.mcpServers) {
+            redactedInput = {
+              ...redactedInput,
+              mcpServers: Object.fromEntries(
+                Object.entries(input.mcpServers).map(([name, server]) => [
+                  name,
+                  server.headers
+                    ? {
+                        ...server,
+                        headers: Object.fromEntries(
+                          Object.entries(server.headers).map(([k]) => [k, "[REDACTED]"]),
+                        ),
+                      }
+                    : server,
+                ]),
+              ),
+            };
+          }
           logLines.push(`=== Input ===`, JSON.stringify(redactedInput, null, 2), ``);
         } else {
           logLines.push(

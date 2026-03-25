@@ -123,14 +123,16 @@ const MAX_CONFIG_FILE_SIZE = 65536;
  * and enforce a size limit to prevent host-side resource exhaustion.
  */
 function loadConfigFile(filePath: string): Record<string, McpServerEntry> | null {
-  // Open once with O_NOFOLLOW so the kernel rejects symlinks atomically.
-  // Then fstat + read on the same fd to eliminate the TOCTOU window between
-  // validation and read. Per-group folders are container-writable, so these
-  // paths are untrusted — a container could race-replace the file between a
-  // separate stat and read.
+  // Open once with O_NOFOLLOW | O_NONBLOCK so the kernel rejects symlinks
+  // atomically and doesn't block on FIFOs or other special files.
+  // Then fstat + read on the same fd to eliminate the TOCTOU window.
+  // Per-group folders are container-writable, so these paths are untrusted.
   let fd: number;
   try {
-    fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    fd = fs.openSync(
+      filePath,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+    );
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return null;
@@ -156,7 +158,11 @@ function loadConfigFile(filePath: string): Record<string, McpServerEntry> | null
       return null;
     }
 
-    const raw = JSON.parse(fs.readFileSync(fd, "utf-8"));
+    // Read exactly the validated byte count to prevent a concurrent writer
+    // from appending past the size limit between fstat and read.
+    const buf = Buffer.alloc(stat.size);
+    const bytesRead = fs.readSync(fd, buf, 0, stat.size, 0);
+    const raw = JSON.parse(buf.subarray(0, bytesRead).toString("utf-8"));
     parsed = McpServersFileSchema.parse(raw);
   } finally {
     fs.closeSync(fd);

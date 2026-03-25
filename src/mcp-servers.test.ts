@@ -24,7 +24,7 @@ vi.mock("fs", async (importOriginal) => {
       ...actual,
       openSync: vi.fn(),
       fstatSync: vi.fn(),
-      readFileSync: vi.fn(),
+      readSync: vi.fn(),
       closeSync: vi.fn(),
       existsSync: vi.fn(),
       lstatSync: vi.fn(),
@@ -105,21 +105,32 @@ describe("interpolateEnvVars", () => {
 // =========================================
 
 const MOCK_FD = 42;
-const regularFileStat = { isFile: () => true, size: 256 };
 
 /** Set up mocks so loadConfigFile succeeds: openSync returns fd, fstatSync returns regular file. */
 function mockConfigExists(
   predicate: (p: string) => boolean,
-  content: string | ((p: unknown) => string),
+  content: string | (() => string),
 ): void {
+  // Track which content to return per call (for merge tests: first=global, second=group)
+  let callIndex = 0;
+  const getContent = () => {
+    callIndex++;
+    return typeof content === "function" ? content() : content;
+  };
+
   vi.mocked(fs.openSync).mockImplementation((p) => {
     if (predicate(String(p))) return MOCK_FD;
     throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
   });
-  vi.mocked(fs.fstatSync).mockReturnValue(regularFileStat as any);
-  vi.mocked(fs.readFileSync).mockImplementation((p) => {
-    if (typeof content === "function") return content(p);
-    return content;
+  // readSync writes the content bytes into the provided buffer and returns bytes read
+  vi.mocked(fs.readSync).mockImplementation((_fd: number, buf: any) => {
+    const data = Buffer.from(getContent(), "utf-8");
+    data.copy(Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength));
+    return data.length;
+  });
+  vi.mocked(fs.fstatSync).mockImplementation(() => {
+    // Return a size large enough for the content (but under 64KB limit)
+    return { isFile: () => true, size: 4096 } as any;
   });
   vi.mocked(fs.closeSync).mockReturnValue(undefined);
 }
@@ -188,14 +199,19 @@ describe("loadMcpServers", () => {
       server_c: { type: "http", url: "http://group-c.com/mcp" },
     };
 
+    let readCallCount = 0;
     vi.mocked(fs.openSync).mockReturnValue(MOCK_FD);
-    vi.mocked(fs.fstatSync).mockReturnValue(regularFileStat as any);
-    vi.mocked(fs.readFileSync).mockImplementation((p) => {
-      // readFileSync is called with the fd (MOCK_FD), not the path.
-      // We distinguish by call order: first call = global, second = group.
-      return JSON.stringify(
-        vi.mocked(fs.readFileSync).mock.calls.length <= 1 ? globalConfig : groupConfig,
+    vi.mocked(fs.fstatSync).mockReturnValue({ isFile: () => true, size: 4096 } as any);
+    vi.mocked(fs.readSync).mockImplementation((_fd: number, buf: any) => {
+      readCallCount++;
+      const data = Buffer.from(
+        JSON.stringify(readCallCount <= 1 ? globalConfig : groupConfig),
+        "utf-8",
       );
+      data.copy(
+        Buffer.isBuffer(buf) ? buf : Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength),
+      );
+      return data.length;
     });
     vi.mocked(fs.closeSync).mockReturnValue(undefined);
 

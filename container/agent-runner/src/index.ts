@@ -472,6 +472,7 @@ async function runQuery(
   // Re-check ipcPolling after each await to avoid pushing into a finished stream.
   let ipcPolling = true;
   let closedDuringQuery = false;
+  let inflightPoll: Promise<void> | null = null;
   const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
     if (await shouldClose()) {
@@ -507,10 +508,13 @@ async function runQuery(
       stream.push(text);
     }
     if (ipcPolling) {
-      setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+      setTimeout(startPoll, IPC_POLL_MS);
     }
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  const startPoll = () => {
+    inflightPoll = pollIpcDuringQuery();
+  };
+  setTimeout(startPoll, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -660,9 +664,11 @@ async function runQuery(
 
   ipcPolling = false;
 
-  // An async poll callback may still be in-flight (inside await shouldClose/drainIpcInput).
-  // Yield once so it can finish and update closedDuringQuery before we read the value.
-  await new Promise((r) => setTimeout(r, 0));
+  // Wait for any in-flight async poll callback to finish. It may still be
+  // inside await shouldClose/drainIpcInput and could update closedDuringQuery.
+  if (inflightPoll) {
+    await inflightPoll;
+  }
 
   // Also re-check the sentinel directly in case _close arrived after the last poll
   // but before we stopped polling — avoids a missed shutdown.
