@@ -475,7 +475,9 @@ async function runQuery(
   const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
     if (await shouldClose()) {
-      if (!ipcPolling) return;
+      // Always honour _close — the sentinel was already consumed from disk.
+      // Even if the query finished during the await, closedDuringQuery must
+      // be set so the outer loop exits instead of waiting for a new signal.
       log("Close sentinel detected during query, ending stream");
       closedDuringQuery = true;
       stream.end();
