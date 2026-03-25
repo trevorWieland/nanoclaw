@@ -363,6 +363,7 @@ const IPC_WAIT_FALLBACK_MS = 2000;
 function waitForIpcMessage(): Promise<string | null> {
   return new Promise((resolve) => {
     let resolved = false;
+    let checking = false;
     let watcher: fs.FSWatcher | null = null;
     let fallbackTimer: ReturnType<typeof setInterval> | null = null;
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -384,18 +385,23 @@ function waitForIpcMessage(): Promise<string | null> {
     };
 
     const check = async () => {
-      if (resolved) return;
-      if (await shouldClose()) {
-        resolved = true;
-        cleanup();
-        resolve(null);
-        return;
-      }
-      const messages = await drainIpcInput();
-      if (messages.length > 0) {
-        resolved = true;
-        cleanup();
-        resolve(messages.join("\n"));
+      if (resolved || checking) return;
+      checking = true;
+      try {
+        if (await shouldClose()) {
+          resolved = true;
+          cleanup();
+          resolve(null);
+          return;
+        }
+        const messages = await drainIpcInput();
+        if (messages.length > 0) {
+          resolved = true;
+          cleanup();
+          resolve(messages.join("\n"));
+        }
+      } finally {
+        checking = false;
       }
     };
 
@@ -462,19 +468,38 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
+  // Poll IPC for follow-up messages and _close sentinel during the query.
+  // Re-check ipcPolling after each await to avoid pushing into a finished stream.
   let ipcPolling = true;
   let closedDuringQuery = false;
   const pollIpcDuringQuery = async () => {
     if (!ipcPolling) return;
     if (await shouldClose()) {
+      if (!ipcPolling) return;
       log("Close sentinel detected during query, ending stream");
       closedDuringQuery = true;
       stream.end();
       ipcPolling = false;
       return;
     }
+    if (!ipcPolling) return;
     const messages = await drainIpcInput();
+    if (!ipcPolling) {
+      // Query finished while we were draining. These messages were already
+      // unlinked — re-write them so the next waitForIpcMessage picks them up.
+      for (const text of messages) {
+        const file = path.join(
+          IPC_INPUT_DIR,
+          `rescued-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`,
+        );
+        try {
+          fs.writeFileSync(file, JSON.stringify({ type: "message", text }));
+        } catch {
+          log(`Failed to rescue IPC message (${text.length} chars)`);
+        }
+      }
+      return;
+    }
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
