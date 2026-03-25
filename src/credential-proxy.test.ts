@@ -20,8 +20,20 @@ vi.mock("./auth-circuit-breaker.js", () => ({
   recordAuthFailure: vi.fn(),
 }));
 
-import { startCredentialProxy } from "./credential-proxy.js";
+import {
+  startCredentialProxy,
+  registerContainerToken,
+  deregisterContainerToken,
+  _resetTokenRegistryForTests,
+  RATE_LIMIT_MAX_REQUESTS,
+  RATE_LIMIT_WINDOW_MS,
+  MAX_BODY_SIZE,
+} from "./credential-proxy.js";
 import { recordAuthFailure } from "./auth-circuit-breaker.js";
+import { logger } from "./logger.js";
+
+const TEST_TOKEN = "test-token-abc123";
+const TEST_CONTAINER = "nanoclaw-test-1234";
 
 function makeRequest(
   port: number,
@@ -50,18 +62,28 @@ function makeRequest(
   });
 }
 
+/** Build a path with the proxy token prefix */
+function tokenPath(path: string, token = TEST_TOKEN): string {
+  return `/proxy/${token}${path}`;
+}
+
 describe("credential-proxy", () => {
   let proxyServer: http.Server;
   let upstreamServer: http.Server;
   let proxyPort: number;
   let upstreamPort: number;
   let lastUpstreamHeaders: http.IncomingHttpHeaders;
+  let lastUpstreamPath: string;
 
   beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
     lastUpstreamHeaders = {};
+    lastUpstreamPath = "";
 
     upstreamServer = http.createServer((req, res) => {
       lastUpstreamHeaders = { ...req.headers };
+      lastUpstreamPath = req.url || "";
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -70,6 +92,7 @@ describe("credential-proxy", () => {
   });
 
   afterEach(async () => {
+    _resetTokenRegistryForTests();
     await new Promise<void>((r) => proxyServer?.close(() => r()));
     await new Promise<void>((r) => upstreamServer?.close(() => r()));
     for (const key of Object.keys(mockEnv)) delete mockEnv[key];
@@ -90,7 +113,7 @@ describe("credential-proxy", () => {
       proxyPort,
       {
         method: "POST",
-        path: "/v1/messages",
+        path: tokenPath("/v1/messages"),
         headers: {
           "content-type": "application/json",
           "x-api-key": "placeholder",
@@ -102,6 +125,24 @@ describe("credential-proxy", () => {
     expect(lastUpstreamHeaders["x-api-key"]).toBe("sk-ant-real-key");
   });
 
+  it("forwards stripped path (without proxy prefix) to upstream", async () => {
+    proxyPort = await startProxy({ ANTHROPIC_API_KEY: "sk-ant-real-key" });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: {
+          "content-type": "application/json",
+        },
+      },
+      "{}",
+    );
+
+    expect(lastUpstreamPath).toBe("/v1/messages");
+  });
+
   it("OAuth mode replaces Authorization when container sends one", async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: "real-oauth-token",
@@ -111,7 +152,7 @@ describe("credential-proxy", () => {
       proxyPort,
       {
         method: "POST",
-        path: "/api/oauth/claude_cli/create_api_key",
+        path: tokenPath("/api/oauth/claude_cli/create_api_key"),
         headers: {
           "content-type": "application/json",
           authorization: "Bearer placeholder",
@@ -133,7 +174,7 @@ describe("credential-proxy", () => {
       proxyPort,
       {
         method: "POST",
-        path: "/v1/messages",
+        path: tokenPath("/v1/messages"),
         headers: {
           "content-type": "application/json",
           "x-api-key": "temp-key-from-exchange",
@@ -153,7 +194,7 @@ describe("credential-proxy", () => {
       proxyPort,
       {
         method: "POST",
-        path: "/v1/messages",
+        path: tokenPath("/v1/messages"),
         headers: {
           "content-type": "application/json",
           connection: "keep-alive",
@@ -172,6 +213,7 @@ describe("credential-proxy", () => {
   });
 
   it("returns 502 when upstream is unreachable", async () => {
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: "sk-ant-real-key",
       ANTHROPIC_BASE_URL: "http://127.0.0.1:59999",
@@ -183,7 +225,7 @@ describe("credential-proxy", () => {
       proxyPort,
       {
         method: "POST",
-        path: "/v1/messages",
+        path: tokenPath("/v1/messages"),
         headers: { "content-type": "application/json" },
       },
       "{}",
@@ -191,6 +233,494 @@ describe("credential-proxy", () => {
 
     expect(res.statusCode).toBe(502);
     expect(res.body).toBe("Bad Gateway");
+  });
+});
+
+describe("token authentication", () => {
+  let proxyServer: http.Server;
+  let upstreamServer: http.Server;
+  let proxyPort: number;
+
+  beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
+
+    upstreamServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
+    const upstreamPort = (upstreamServer.address() as AddressInfo).port;
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: "sk-ant-real-key",
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    _resetTokenRegistryForTests();
+    await new Promise<void>((r) => proxyServer?.close(() => r()));
+    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+  });
+
+  it("accepts request with valid token", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects request with invalid token", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages", "wrong-token"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toBe("invalid_token");
+  });
+
+  it("rejects request with no proxy prefix", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: "/v1/messages",
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toBe("invalid_token");
+  });
+
+  it("rejects request after token is deregistered", async () => {
+    deregisterContainerToken(TEST_CONTAINER);
+
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects malformed proxy prefix (no trailing path)", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: `/proxy/${TEST_TOKEN}`,
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(403);
+  });
+});
+
+describe("path validation", () => {
+  let proxyServer: http.Server;
+  let upstreamServer: http.Server;
+  let proxyPort: number;
+
+  beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
+
+    upstreamServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
+    const upstreamPort = (upstreamServer.address() as AddressInfo).port;
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: "sk-ant-real-key",
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    _resetTokenRegistryForTests();
+    await new Promise<void>((r) => proxyServer?.close(() => r()));
+    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+  });
+
+  it("allows /v1/messages", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("allows /api/oauth/claude_cli/create_api_key", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/api/oauth/claude_cli/create_api_key"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects /etc/passwd", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/etc/passwd"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toBe("bad_path");
+  });
+
+  it("rejects path traversal", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/../etc/passwd"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toBe("bad_path");
+  });
+});
+
+describe("request validation", () => {
+  let proxyServer: http.Server;
+  let upstreamServer: http.Server;
+  let proxyPort: number;
+
+  beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
+
+    upstreamServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
+    const upstreamPort = (upstreamServer.address() as AddressInfo).port;
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: "sk-ant-real-key",
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    _resetTokenRegistryForTests();
+    await new Promise<void>((r) => proxyServer?.close(() => r()));
+    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+  });
+
+  it("rejects GET requests", async () => {
+    const res = await makeRequest(proxyPort, {
+      method: "GET",
+      path: tokenPath("/v1/messages"),
+      headers: { "content-type": "application/json" },
+    });
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toBe("method_not_allowed");
+  });
+
+  it("rejects unsupported content-type", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "text/plain" },
+      },
+      "hello",
+    );
+    expect(res.statusCode).toBe(415);
+    expect(res.body).toBe("unsupported_content_type");
+  });
+
+  it("allows application/x-www-form-urlencoded (OAuth exchange)", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/api/oauth/claude_cli/create_api_key"),
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+      },
+      "grant_type=client_credentials",
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("rejects Content-Length exceeding MAX_BODY_SIZE", async () => {
+    const res = await makeRequest(proxyPort, {
+      method: "POST",
+      path: tokenPath("/v1/messages"),
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(MAX_BODY_SIZE + 1),
+      },
+    });
+    expect(res.statusCode).toBe(413);
+    expect(res.body).toBe("body_too_large");
+  });
+});
+
+describe("rate limiting", () => {
+  let proxyServer: http.Server;
+  let upstreamServer: http.Server;
+  let proxyPort: number;
+
+  beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
+
+    upstreamServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
+    const upstreamPort = (upstreamServer.address() as AddressInfo).port;
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: "sk-ant-real-key",
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    _resetTokenRegistryForTests();
+    await new Promise<void>((r) => proxyServer?.close(() => r()));
+    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+  });
+
+  it("allows requests under the rate limit", async () => {
+    // Send a few requests — should all succeed
+    for (let i = 0; i < 5; i++) {
+      const res = await makeRequest(
+        proxyPort,
+        {
+          method: "POST",
+          path: tokenPath("/v1/messages"),
+          headers: { "content-type": "application/json" },
+        },
+        "{}",
+      );
+      expect(res.statusCode).toBe(200);
+    }
+  });
+
+  it("rejects requests exceeding the rate limit", async () => {
+    // Exhaust the rate limit
+    const requests = [];
+    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
+      requests.push(
+        makeRequest(
+          proxyPort,
+          {
+            method: "POST",
+            path: tokenPath("/v1/messages"),
+            headers: { "content-type": "application/json" },
+          },
+          "{}",
+        ),
+      );
+    }
+    await Promise.all(requests);
+
+    // Next request should be rate limited
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(429);
+    expect(res.body).toBe("rate_limited");
+  });
+
+  it("different containers have independent rate limits", async () => {
+    const otherToken = "other-token-xyz";
+    const otherContainer = "nanoclaw-other-5678";
+    registerContainerToken(otherContainer, otherToken);
+
+    // Exhaust rate limit for TEST_CONTAINER
+    const requests = [];
+    for (let i = 0; i < RATE_LIMIT_MAX_REQUESTS; i++) {
+      requests.push(
+        makeRequest(
+          proxyPort,
+          {
+            method: "POST",
+            path: tokenPath("/v1/messages"),
+            headers: { "content-type": "application/json" },
+          },
+          "{}",
+        ),
+      );
+    }
+    await Promise.all(requests);
+
+    // Other container should still be allowed
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages", otherToken),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("audit logging", () => {
+  let proxyServer: http.Server;
+  let upstreamServer: http.Server;
+  let proxyPort: number;
+
+  beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
+    vi.mocked(logger.info).mockClear();
+    vi.mocked(logger.warn).mockClear();
+
+    upstreamServer = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>((resolve) => upstreamServer.listen(0, "127.0.0.1", resolve));
+    const upstreamPort = (upstreamServer.address() as AddressInfo).port;
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_API_KEY: "sk-ant-real-key",
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+    });
+    proxyServer = await startCredentialProxy(0);
+    proxyPort = (proxyServer.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    _resetTokenRegistryForTests();
+    await new Promise<void>((r) => proxyServer?.close(() => r()));
+    await new Promise<void>((r) => upstreamServer?.close(() => r()));
+    for (const key of Object.keys(mockEnv)) delete mockEnv[key];
+  });
+
+  it("logs credential_proxy_request on successful forward", async () => {
+    await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const auditCall = infoCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "credential_proxy_request",
+    );
+    expect(auditCall).toBeDefined();
+    const data = auditCall![0] as Record<string, unknown>;
+    expect(data.container).toBe(TEST_CONTAINER);
+    expect(data.path).toBe("/v1/messages");
+    expect(data.authMode).toBe("api-key");
+  });
+
+  it("logs credential_proxy_rejected on invalid token", async () => {
+    await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/messages", "bad-token"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+
+    const warnCalls = vi.mocked(logger.warn).mock.calls;
+    const rejectCall = warnCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "credential_proxy_rejected",
+    );
+    expect(rejectCall).toBeDefined();
+    const data = rejectCall![0] as Record<string, unknown>;
+    expect(data.reason).toBe("invalid_token");
+  });
+
+  it("logs credential_proxy_register on token registration", async () => {
+    vi.mocked(logger.info).mockClear();
+    registerContainerToken("new-container", "new-token");
+
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const registerCall = infoCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "credential_proxy_register",
+    );
+    expect(registerCall).toBeDefined();
+    expect((registerCall![0] as any).container).toBe("new-container");
+  });
+
+  it("logs credential_proxy_deregister on token deregistration", async () => {
+    vi.mocked(logger.info).mockClear();
+    deregisterContainerToken(TEST_CONTAINER);
+
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const deregisterCall = infoCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "credential_proxy_deregister",
+    );
+    expect(deregisterCall).toBeDefined();
+    expect((deregisterCall![0] as any).container).toBe(TEST_CONTAINER);
   });
 });
 
@@ -220,6 +750,8 @@ describe("OAuth token refresh", () => {
   }
 
   beforeEach(async () => {
+    _resetTokenRegistryForTests();
+    registerContainerToken(TEST_CONTAINER, TEST_TOKEN);
     savedHome = process.env.HOME;
     tmpDir = await mkdtemp(nodePath.join(tmpdir(), "cred-proxy-test-"));
     process.env.HOME = tmpDir;
@@ -237,6 +769,7 @@ describe("OAuth token refresh", () => {
   });
 
   afterEach(async () => {
+    _resetTokenRegistryForTests();
     process.env.HOME = savedHome;
     vi.unstubAllGlobals();
     await new Promise<void>((r) => proxyServer?.close(() => r()));
@@ -255,7 +788,7 @@ describe("OAuth token refresh", () => {
 
   const oauthRequest = {
     method: "POST",
-    path: "/api/oauth/claude_cli/create_api_key",
+    path: tokenPath("/api/oauth/claude_cli/create_api_key"),
     headers: {
       "content-type": "application/json",
       authorization: "Bearer placeholder",

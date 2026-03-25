@@ -8,6 +8,7 @@
  * - Main-group project mount stays read-only so agents cannot rewrite host code.
  */
 import { ChildProcess, exec, spawn } from "child_process";
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -37,7 +38,11 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from "./container-runtime.js";
-import { detectAuthMode } from "./credential-proxy.js";
+import {
+  detectAuthMode,
+  registerContainerToken,
+  deregisterContainerToken,
+} from "./credential-proxy.js";
 import { validateAdditionalMounts } from "./mount-security.js";
 import { isAuthError, recordAuthFailure, recordAuthSuccess } from "./auth-circuit-breaker.js";
 import {
@@ -280,21 +285,27 @@ interface ContainerArgsOptions {
   containerName: string;
   memoryLimit: string;
   cpuLimit: string;
+  proxyToken: string;
 }
 
 function buildContainerArgs(options: ContainerArgsOptions): string[] {
-  const { mounts, containerName, memoryLimit, cpuLimit } = options;
+  const { mounts, containerName, memoryLimit, cpuLimit, proxyToken } = options;
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
   args.push("--label", `nanoclaw.instance=${INSTANCE_ID}`);
 
   // Pass host timezone so container's local time matches the user's
   args.push("-e", `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
+  // Route API traffic through the credential proxy (containers never see real secrets).
+  // Token is embedded in the URL path so the proxy can authenticate each container.
+  const proxyPrefix = `/proxy/${proxyToken}`;
   if (CREDENTIAL_PROXY_EXTERNAL_URL) {
-    args.push("-e", `ANTHROPIC_BASE_URL=${CREDENTIAL_PROXY_EXTERNAL_URL}`);
+    args.push("-e", `ANTHROPIC_BASE_URL=${CREDENTIAL_PROXY_EXTERNAL_URL}${proxyPrefix}`);
   } else {
-    args.push("-e", `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+    args.push(
+      "-e",
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}${proxyPrefix}`,
+    );
   }
 
   // Mirror the host's auth method with a placeholder value.
@@ -369,11 +380,14 @@ export async function runContainerAgent(
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const memoryLimit = group.containerConfig?.memoryLimit || CONTAINER_MEMORY_LIMIT;
   const cpuLimit = group.containerConfig?.cpuLimit || CONTAINER_CPU_LIMIT;
+  const proxyToken = randomBytes(32).toString("hex");
+  registerContainerToken(containerName, proxyToken);
   const containerArgs = buildContainerArgs({
     mounts,
     containerName,
     memoryLimit,
     cpuLimit,
+    proxyToken,
   });
 
   logger.debug(
@@ -561,6 +575,7 @@ export async function runContainerAgent(
 
     container.on("close", (code) => {
       clearTimeout(timeout);
+      deregisterContainerToken(containerName);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -803,6 +818,7 @@ export async function runContainerAgent(
 
     container.on("error", (err) => {
       clearTimeout(timeout);
+      deregisterContainerToken(containerName);
       logger.error({ group: group.name, containerName, err }, "Container spawn error");
       resolve({
         status: "error",

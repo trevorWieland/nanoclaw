@@ -15,6 +15,7 @@ import {
   recordAuthFailure,
   recordAuthSuccess,
 } from "./auth-circuit-breaker.js";
+import { logger } from "./logger.js";
 
 beforeEach(() => {
   _resetAuthCircuitBreakerForTests();
@@ -112,5 +113,51 @@ describe("circuit breaker state machine", () => {
     const result = checkCircuit();
     expect(result.reason).toContain("3 consecutive failures");
     expect(result.reason).toContain("10 minutes");
+  });
+});
+
+describe("circuit breaker audit events", () => {
+  beforeEach(() => {
+    vi.mocked(logger.error).mockClear();
+    vi.mocked(logger.info).mockClear();
+  });
+
+  it("logs circuit_breaker_open event when circuit opens", () => {
+    recordAuthFailure();
+    recordAuthFailure();
+    recordAuthFailure();
+
+    const errorCalls = vi.mocked(logger.error).mock.calls;
+    const openCall = errorCalls.find(
+      (call) => typeof call[0] === "object" && (call[0] as any).event === "circuit_breaker_open",
+    );
+    expect(openCall).toBeDefined();
+  });
+
+  it("logs circuit_breaker_reset event on success after failure", () => {
+    recordAuthFailure();
+    recordAuthSuccess();
+
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const resetCall = infoCalls.find(
+      (call) => typeof call[0] === "object" && (call[0] as any).event === "circuit_breaker_reset",
+    );
+    expect(resetCall).toBeDefined();
+  });
+
+  it("logs circuit_breaker_auto_reset event after timeout", () => {
+    recordAuthFailure();
+    recordAuthFailure();
+    recordAuthFailure();
+
+    vi.advanceTimersByTime(15 * 60 * 1000);
+    checkCircuit();
+
+    const infoCalls = vi.mocked(logger.info).mock.calls;
+    const autoResetCall = infoCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "circuit_breaker_auto_reset",
+    );
+    expect(autoResetCall).toBeDefined();
   });
 });
