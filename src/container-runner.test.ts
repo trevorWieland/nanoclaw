@@ -184,7 +184,7 @@ function resetMocks() {
   mockRuntimePaths.DATA_DIR = "/tmp/nanoclaw-test-data";
 }
 
-describe("container-runner tanren passthrough", () => {
+describe("container-runner MCP passthrough", () => {
   beforeEach(() => {
     resetMocks();
     vi.useFakeTimers();
@@ -194,61 +194,6 @@ describe("container-runner tanren passthrough", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-  });
-
-  it("passes TANREN_API_URL env var when tanren config is provided", async () => {
-    const resultPromise = runContainerAgent(
-      testGroup,
-      {
-        ...testInput,
-        isMain: true,
-        tanren: { apiUrl: "http://tanren:8000", apiKey: "key-123" },
-      },
-      () => {},
-    );
-
-    // Check spawn args include TANREN_API_URL
-    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
-    const envIdx = spawnArgs.indexOf("TANREN_API_URL=http://tanren:8000");
-    expect(envIdx).toBeGreaterThan(-1);
-    // The -e flag should precede the env var
-    expect(spawnArgs[envIdx - 1]).toBe("-e");
-
-    // Clean up: emit close
-    fakeProc.emit("close", 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-  });
-
-  it("does NOT pass TANREN_API_URL when tanren config is absent", async () => {
-    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
-
-    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
-    const hasTanren = spawnArgs.some((arg) => arg.includes("TANREN_API_URL"));
-    expect(hasTanren).toBe(false);
-
-    fakeProc.emit("close", 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
-  });
-
-  it("includes tanren config in stdin JSON when provided", async () => {
-    const tanrenConfig = { apiUrl: "http://tanren:8000", apiKey: "key-123" };
-    const resultPromise = runContainerAgent(
-      testGroup,
-      { ...testInput, isMain: true, tanren: tanrenConfig },
-      () => {},
-    );
-
-    // Read what was written to stdin
-    const stdinData = (fakeProc.stdin as PassThrough).read();
-    expect(stdinData).not.toBeNull();
-    const parsed = JSON.parse(stdinData!.toString());
-    expect(parsed.tanren).toEqual(tanrenConfig);
-
-    fakeProc.emit("close", 0);
-    await vi.advanceTimersByTimeAsync(10);
-    await resultPromise;
   });
 
   it("includes mcpServers in stdin JSON when provided", async () => {
@@ -456,14 +401,14 @@ describe("container-runner agent-runner sync", () => {
       // Existing files in session dir
       if (existingFiles.has(s)) return true;
       // New file doesn't exist yet
-      if (s.endsWith("tanren-mcp-stdio.ts")) return false;
+      if (s.endsWith("new-helper.ts")) return false;
       return false;
     });
 
     vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
       const s = p.toString();
       if (s.endsWith("container/agent-runner/src")) {
-        return ["agent.ts", "tools.ts", "tanren-mcp-stdio.ts"];
+        return ["agent.ts", "tools.ts", "new-helper.ts"];
       }
       if (s.includes("container/skills")) {
         return [];
@@ -482,7 +427,7 @@ describe("container-runner agent-runner sync", () => {
       .map(([src]) => src.toString());
 
     expect(copiedFiles).toHaveLength(1);
-    expect(copiedFiles[0]).toContain("tanren-mcp-stdio.ts");
+    expect(copiedFiles[0]).toContain("new-helper.ts");
 
     // Existing files should NOT have been overwritten
     expect(copiedFiles.some((f) => f.endsWith("agent.ts"))).toBe(false);

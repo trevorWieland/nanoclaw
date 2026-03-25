@@ -72,7 +72,6 @@ interface GroupProcessorDeps {
       chatJid: string;
       isMain: boolean;
       assistantName: string;
-      tanren?: { apiUrl: string; apiKey: string };
       mcpServers?: Record<
         string,
         { type: "http" | "sse"; url: string; headers?: Record<string, string> }
@@ -100,7 +99,6 @@ interface GroupProcessorDeps {
     availableGroups: AvailableGroup[],
   ) => void;
   getAvailableGroups: () => Promise<AvailableGroup[]>;
-  readTanrenConfig: () => { apiUrl: string; apiKey: string } | null | undefined;
   readMcpServersConfig: (
     groupFolder: string,
     isMain: boolean,
@@ -156,8 +154,6 @@ export function createGroupProcessor(
         }
       : undefined;
 
-    const tanrenConfig = isMain ? deps.readTanrenConfig() : undefined;
-
     try {
       // MCP config loading can throw on malformed JSON, invalid schema, or
       // reserved names. Must be inside the try block so failures trigger the
@@ -173,7 +169,6 @@ export function createGroupProcessor(
           chatJid,
           isMain,
           assistantName: ASSISTANT_NAME,
-          tanren: tanrenConfig ?? undefined,
           mcpServers: mcpServersConfig,
         },
         (proc, containerName) =>

@@ -55,7 +55,7 @@ import { findChannel, formatOutbound } from "./router.js";
 import { isSenderAllowed, loadSenderAllowlist, shouldDropMessage } from "./sender-allowlist.js";
 import { syncProjectMeta } from "./project-meta.js";
 import { startSchedulerLoop } from "./task-scheduler.js";
-import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
+import { createTanrenClient } from "./tanren/index.js";
 import { loadHealthMonitorConfig } from "./health-monitor-config.js";
 import { getHealthSnapshot, getRecentEvents, startHealthMonitor } from "./health-monitor.js";
 import type { HealthSource } from "./health-monitor.js";
@@ -436,7 +436,6 @@ async function main(): Promise<void> {
     writeTasksSnapshot,
     writeGroupsSnapshot,
     getAvailableGroups,
-    readTanrenConfig,
     readMcpServersConfig: (groupFolder, isMain) =>
       loadMcpServers(MCP_SERVERS_CONFIG_PATH, groupFolder, isMain),
   });
@@ -457,7 +456,6 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-    readTanrenConfig,
     readMcpServersConfig: (groupFolder, isMain) =>
       loadMcpServers(MCP_SERVERS_CONFIG_PATH, groupFolder, isMain),
     runAgent: runContainerAgent,

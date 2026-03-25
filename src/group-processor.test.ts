@@ -105,7 +105,6 @@ function createMockDeps(
     writeTasksSnapshot: vi.fn(),
     writeGroupsSnapshot: vi.fn(),
     getAvailableGroups: vi.fn(async () => []),
-    readTanrenConfig: () => undefined,
     readMcpServersConfig: () => undefined,
     ...overrides,
   };

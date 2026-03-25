@@ -143,12 +143,6 @@ export const ContainerInputSchema = z
     isMain: z.boolean(),
     isScheduledTask: z.boolean().optional(),
     assistantName: z.string().optional(),
-    tanren: z
-      .object({
-        apiUrl: z.string(),
-        apiKey: z.string(),
-      })
-      .optional(),
     mcpServers: z
       .record(
         z.string(),

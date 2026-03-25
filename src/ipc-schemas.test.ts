@@ -444,7 +444,6 @@ describe("ContainerInputSchema", () => {
       isMain: true,
       isScheduledTask: true,
       assistantName: "Andy",
-      tanren: { apiUrl: "http://localhost:3000", apiKey: "key-123" },
     });
     expect(result.success).toBe(true);
   });
@@ -475,17 +474,6 @@ describe("ContainerInputSchema", () => {
       groupFolder: "test-group",
       chatJid: "group@g.us",
       isMain: "true",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects partial tanren (missing apiKey)", () => {
-    const result = ContainerInputSchema.safeParse({
-      prompt: "hello",
-      groupFolder: "test-group",
-      chatJid: "group@g.us",
-      isMain: false,
-      tanren: { apiUrl: "http://localhost:3000" },
     });
     expect(result.success).toBe(false);
   });

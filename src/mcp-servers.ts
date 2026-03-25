@@ -35,7 +35,7 @@ const McpServersFileSchema = z.record(z.string(), McpServerEntrySchema);
 const SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 /** Names reserved for built-in MCP servers that must not be overridden. */
-const RESERVED_SERVER_NAMES = new Set(["nanoclaw", "tanren"]);
+const RESERVED_SERVER_NAMES = new Set(["nanoclaw"]);
 
 type McpServerEntry = z.infer<typeof McpServerEntrySchema>;
 

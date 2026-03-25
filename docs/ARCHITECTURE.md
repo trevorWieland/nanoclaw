@@ -175,10 +175,7 @@ The agent runner is a separate npm package at `container/agent-runner/`. It runs
 
 **IPC polling loop**: after the initial query, the runner watches `/workspace/ipc/input/` for follow-up message files. Each file contains `{type:"message", text:"..."}`. The sentinel file `/workspace/ipc/input/_close` signals the session should end.
 
-**MCP servers**: two optional MCP servers run as child processes:
-
-- **IPC MCP** (`ipc-mcp-stdio.ts`): exposes host communication tools (send messages, manage tasks, register groups).
-- **Tanren MCP** (`tanren-mcp-stdio.ts`): exposes VM provisioning and dispatch operations (main group only).
+**MCP servers**: the IPC MCP server (`ipc-mcp-stdio.ts`) runs as a stdio child process, exposing host communication tools (send messages, manage tasks, register groups). Additional MCP servers from `ContainerInput.mcpServers` are registered as HTTP/SSE remotes (e.g. tanren-api).
 
 **Session management**: resumes from an existing session ID if provided in `ContainerInput`. Stores the new session ID in the output for the host to persist.
 
@@ -261,9 +258,9 @@ Tanren is an optional VM provisioning service for dispatching coding work to rem
 
 **Host-side client** (`src/tanren/client.ts`): API client with retry/backoff logic. Created at startup if `TANREN_API_URL` and `TANREN_API_KEY` are set. Performs a non-blocking health check on startup.
 
-**Container-side MCP** (`container/agent-runner/src/tanren-mcp-stdio.ts`): exposes VM provisioning and dispatch operations as MCP tools. Only available to main group containers (tanren config is passed in `ContainerInput` only for main groups).
+**Container-side MCP**: Agent containers connect to tanren-api's native MCP server via the config-driven HTTP MCP system (`mcp-servers.json`). All 23 tanren-api tools are available and auto-sync with tanren-api releases. Gated to main group via `onlyMain: true`.
 
-**Error handling**: custom `TanrenAPIError` class. Container-side implementation is intentionally minimal (raw fetch, no retry) -- the host-side client handles retry/backoff for orchestrator use.
+**Error handling**: custom `TanrenAPIError` class for the host-side client with retry/backoff.
 
 ---
 
@@ -303,27 +300,27 @@ All paths are env-configurable for containerized deployment. When unset, they co
 
 ### Key Environment Variables
 
-| Variable                        | Default           | Purpose                                                  |
-| ------------------------------- | ----------------- | -------------------------------------------------------- |
-| `ASSISTANT_NAME`                | `"Andy"`          | Bot trigger name (`@Andy`)                               |
-| `DB_BACKEND`                    | `"sqlite"`        | Database adapter: `"sqlite"` or `"postgres"`             |
-| `DATABASE_URL`                  | (auto)            | SQLite file path or Postgres connection string           |
-| `CONTAINER_IMAGE`               | (required)        | Docker image for agent containers                        |
-| `CONTAINER_TIMEOUT`             | `1800000` (30m)   | Max container runtime (ms)                               |
-| `CONTAINER_MEMORY_LIMIT`        | `"4g"`            | Container memory limit                                   |
-| `CONTAINER_CPU_LIMIT`           | `"2"`             | Container CPU limit                                      |
-| `CONTAINER_MAX_OUTPUT_SIZE`     | `10485760` (10MB) | Max stdout/stderr capture per container                  |
-| `MAX_CONCURRENT_CONTAINERS`     | `5`               | Global container concurrency limit                       |
-| `CREDENTIAL_PROXY_PORT`         | `3001`            | Credential proxy listen port                             |
-| `STATUS_PORT`                   | `3002`            | Status server listen port                                |
-| `STATUS_BIND_HOST`              | `"127.0.0.1"`     | Status server bind address                               |
-| `IDLE_TIMEOUT`                  | `1800000` (30m)   | Container idle timeout after last output                 |
-| `TANREN_API_URL`                | (unset)           | Tanren API endpoint (enables integration)                |
-| `TANREN_API_KEY`                | (unset)           | Tanren API key                                           |
-| `AGENT_NETWORK`                 | (unset)           | Docker network for sibling container communication       |
-| `CONTAINER_HOST_CONFIG_DIR`     | (unset)           | Host-side CONFIG_ROOT path (Docker-out-of-Docker)        |
-| `CONTAINER_HOST_DATA_DIR`       | (unset)           | Host-side DATA_DIR path (Docker-out-of-Docker)           |
-| `CREDENTIAL_PROXY_EXTERNAL_URL` | (unset)           | Override proxy URL for containers (Docker-out-of-Docker) |
+| Variable                        | Default           | Purpose                                                     |
+| ------------------------------- | ----------------- | ----------------------------------------------------------- |
+| `ASSISTANT_NAME`                | `"Andy"`          | Bot trigger name (`@Andy`)                                  |
+| `DB_BACKEND`                    | `"sqlite"`        | Database adapter: `"sqlite"` or `"postgres"`                |
+| `DATABASE_URL`                  | (auto)            | SQLite file path or Postgres connection string              |
+| `CONTAINER_IMAGE`               | (required)        | Docker image for agent containers                           |
+| `CONTAINER_TIMEOUT`             | `1800000` (30m)   | Max container runtime (ms)                                  |
+| `CONTAINER_MEMORY_LIMIT`        | `"4g"`            | Container memory limit                                      |
+| `CONTAINER_CPU_LIMIT`           | `"2"`             | Container CPU limit                                         |
+| `CONTAINER_MAX_OUTPUT_SIZE`     | `10485760` (10MB) | Max stdout/stderr capture per container                     |
+| `MAX_CONCURRENT_CONTAINERS`     | `5`               | Global container concurrency limit                          |
+| `CREDENTIAL_PROXY_PORT`         | `3001`            | Credential proxy listen port                                |
+| `STATUS_PORT`                   | `3002`            | Status server listen port                                   |
+| `STATUS_BIND_HOST`              | `"127.0.0.1"`     | Status server bind address                                  |
+| `IDLE_TIMEOUT`                  | `1800000` (30m)   | Container idle timeout after last output                    |
+| `TANREN_API_URL`                | (unset)           | Host-side health client + MCP config `${...}` interpolation |
+| `TANREN_API_KEY`                | (unset)           | Host-side health client + MCP config `${...}` interpolation |
+| `AGENT_NETWORK`                 | (unset)           | Docker network for sibling container communication          |
+| `CONTAINER_HOST_CONFIG_DIR`     | (unset)           | Host-side CONFIG_ROOT path (Docker-out-of-Docker)           |
+| `CONTAINER_HOST_DATA_DIR`       | (unset)           | Host-side DATA_DIR path (Docker-out-of-Docker)              |
+| `CREDENTIAL_PROXY_EXTERNAL_URL` | (unset)           | Override proxy URL for containers (Docker-out-of-Docker)    |
 
 **Hard-coded constants** (not configurable via env): `POLL_INTERVAL` (2000ms message polling), `SCHEDULER_POLL_INTERVAL` (60000ms task check), `IPC_POLL_INTERVAL` (1000ms IPC scan), `MAX_PROMPT_MESSAGES` (200).
 

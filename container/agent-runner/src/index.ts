@@ -34,12 +34,6 @@ const ContainerInputSchema = z.object({
   isMain: z.boolean(),
   isScheduledTask: z.boolean().optional(),
   assistantName: z.string().optional(),
-  tanren: z
-    .object({
-      apiUrl: z.string(),
-      apiKey: z.string(),
-    })
-    .optional(),
   mcpServers: z
     .record(
       z.string(),
@@ -463,7 +457,6 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-  tanrenMcpPath?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -576,9 +569,6 @@ async function runQuery(
           "NotebookEdit",
           "mcp__nanoclaw__*",
         ];
-        if (containerInput.isMain && containerInput.tanren) {
-          tools.push("mcp__tanren__*");
-        }
         if (containerInput.mcpServers) {
           for (const name of Object.keys(containerInput.mcpServers)) {
             tools.push(`mcp__${name}__*`);
@@ -602,16 +592,6 @@ async function runQuery(
             },
           },
         };
-        if (containerInput.isMain && containerInput.tanren && tanrenMcpPath) {
-          servers.tanren = {
-            command: "node",
-            args: [tanrenMcpPath],
-            env: {
-              TANREN_API_URL: containerInput.tanren.apiUrl,
-              TANREN_API_KEY: containerInput.tanren.apiKey,
-            },
-          };
-        }
         if (containerInput.mcpServers) {
           for (const [name, server] of Object.entries(containerInput.mcpServers)) {
             servers[name] = server;
@@ -710,12 +690,6 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, "ipc-mcp-stdio.js");
-  const tanrenMcpCandidate = path.join(__dirname, "tanren-mcp-stdio.js");
-  const tanrenMcpPath = fs.existsSync(tanrenMcpCandidate) ? tanrenMcpCandidate : undefined;
-  if (containerInput.isMain && containerInput.tanren && !tanrenMcpPath) {
-    log("tanren-mcp-stdio.js not found — skipping tanren MCP server");
-  }
-
   let sessionId = containerInput.sessionId;
   await mkdir(IPC_INPUT_DIR, { recursive: true });
 
@@ -863,7 +837,6 @@ async function main(): Promise<void> {
         containerInput,
         sdkEnv,
         resumeAt,
-        tanrenMcpPath,
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
