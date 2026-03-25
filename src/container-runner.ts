@@ -300,7 +300,8 @@ function buildContainerArgs(options: ContainerArgsOptions): string[] {
   // Token is embedded in the URL path so the proxy can authenticate each container.
   const proxyPrefix = `/proxy/${proxyToken}`;
   if (CREDENTIAL_PROXY_EXTERNAL_URL) {
-    args.push("-e", `ANTHROPIC_BASE_URL=${CREDENTIAL_PROXY_EXTERNAL_URL}${proxyPrefix}`);
+    const baseUrl = CREDENTIAL_PROXY_EXTERNAL_URL.replace(/\/+$/, "");
+    args.push("-e", `ANTHROPIC_BASE_URL=${baseUrl}${proxyPrefix}`);
   } else {
     args.push(
       "-e",
@@ -382,13 +383,43 @@ export async function runContainerAgent(
   const cpuLimit = group.containerConfig?.cpuLimit || CONTAINER_CPU_LIMIT;
   const proxyToken = randomBytes(32).toString("hex");
   registerContainerToken(containerName, proxyToken);
-  const containerArgs = buildContainerArgs({
-    mounts,
-    containerName,
-    memoryLimit,
-    cpuLimit,
-    proxyToken,
-  });
+
+  // All setup between registration and spawn can throw (buildContainerArgs if
+  // CONTAINER_IMAGE is missing, ContainerInputSchema.parse on bad input).
+  // Deregister the token if any of this fails so we don't leak stale tokens.
+  let containerArgs: string[];
+  let containerInput: ContainerInput;
+  try {
+    containerArgs = buildContainerArgs({
+      mounts,
+      containerName,
+      memoryLimit,
+      cpuLimit,
+      proxyToken,
+    });
+
+    // Rewrite localhost URLs so the container reaches the host via Docker gateway.
+    // Validate before spawning so a schema failure cannot leak an orphan container.
+    const rewriteLocalhostUrl = (url: string) =>
+      url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, `//${CONTAINER_HOST_GATEWAY}`);
+
+    containerInput = ContainerInputSchema.parse({
+      ...input,
+      ...(input.mcpServers
+        ? {
+            mcpServers: Object.fromEntries(
+              Object.entries(input.mcpServers).map(([name, server]) => [
+                name,
+                { ...server, url: rewriteLocalhostUrl(server.url) },
+              ]),
+            ),
+          }
+        : {}),
+    });
+  } catch (err) {
+    deregisterContainerToken(containerName);
+    throw err;
+  }
 
   logger.debug(
     {
@@ -411,26 +442,6 @@ export async function runContainerAgent(
     },
     "Spawning container agent",
   );
-
-  // Rewrite localhost URLs so the container reaches the host via Docker gateway.
-  // Validate before spawning so a schema failure cannot leak an orphan container.
-  const rewriteLocalhostUrl = (url: string) =>
-    url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, `//${CONTAINER_HOST_GATEWAY}`);
-
-  const containerInput = {
-    ...input,
-    ...(input.mcpServers
-      ? {
-          mcpServers: Object.fromEntries(
-            Object.entries(input.mcpServers).map(([name, server]) => [
-              name,
-              { ...server, url: rewriteLocalhostUrl(server.url) },
-            ]),
-          ),
-        }
-      : {}),
-  };
-  ContainerInputSchema.parse(containerInput);
 
   // Store host-side container logs outside the container-writable group directory.
   // This prevents symlink/hardlink redirection attacks from untrusted group content.

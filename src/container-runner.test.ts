@@ -522,6 +522,21 @@ describe("container-runner CREDENTIAL_PROXY_EXTERNAL_URL", () => {
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
   });
+
+  it("normalizes trailing slash on CREDENTIAL_PROXY_EXTERNAL_URL", async () => {
+    mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "http://nanoclaw:3001/";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
+    // Must NOT contain double-slash before /proxy/
+    expect(baseUrlArg).toMatch(/^ANTHROPIC_BASE_URL=http:\/\/nanoclaw:3001\/proxy\/[a-f0-9]{64}$/);
+    expect(baseUrlArg).not.toContain("//proxy/");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
 });
 
 describe("container-runner volume mount overrides", () => {
@@ -1090,5 +1105,18 @@ describe("container-runner proxy token lifecycle", () => {
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
+  });
+
+  it("deregisters proxy token when pre-spawn setup throws", async () => {
+    // CONTAINER_IMAGE being empty causes buildContainerArgs to throw
+    mockConfig.CONTAINER_IMAGE = "";
+
+    await expect(runContainerAgent(testGroup, testInput, () => {})).rejects.toThrow(
+      "CONTAINER_IMAGE is required",
+    );
+
+    // Token was registered then deregistered on the setup failure
+    expect(registerContainerToken).toHaveBeenCalledTimes(1);
+    expect(deregisterContainerToken).toHaveBeenCalledTimes(1);
   });
 });

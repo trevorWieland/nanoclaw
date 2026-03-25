@@ -50,6 +50,11 @@ const containerToToken = new Map<string, string>();
 
 /** Register a per-container proxy token. Called before spawning. */
 export function registerContainerToken(containerName: string, token: string): void {
+  // Remove any prior token for this container to prevent orphaned valid tokens
+  const existingToken = containerToToken.get(containerName);
+  if (existingToken && existingToken !== token) {
+    tokenToContainer.delete(existingToken);
+  }
   tokenToContainer.set(token, containerName);
   containerToToken.set(containerName, token);
   logger.info(
@@ -112,7 +117,7 @@ const ALLOWED_CONTENT_TYPES = ["application/json", "application/x-www-form-urlen
 const PROXY_TOKEN_PREFIX = "/proxy/";
 
 /** Extract and validate the proxy token from the URL path.
- *  Returns { token, containerName, strippedPath } on success, or null if invalid. */
+ *  Returns { containerName, strippedPath } on success, or null if invalid. */
 function parseProxyToken(url: string): { containerName: string; strippedPath: string } | null {
   if (!url.startsWith(PROXY_TOKEN_PREFIX)) return null;
   const rest = url.slice(PROXY_TOKEN_PREFIX.length);
@@ -126,9 +131,28 @@ function parseProxyToken(url: string): { containerName: string; strippedPath: st
 }
 
 function isAllowedPath(strippedPath: string): boolean {
-  // Reject path traversal
-  if (strippedPath.includes("..")) return false;
-  return ALLOWED_PATH_PREFIXES.some((prefix) => strippedPath.startsWith(prefix));
+  // Parse as URL to isolate pathname from query/fragment
+  let pathname: string;
+  try {
+    pathname = new URL(strippedPath, "http://localhost").pathname;
+  } catch {
+    return false;
+  }
+
+  // Reject path traversal — decode each segment to catch %2e%2e encoding tricks
+  const segments = pathname.split("/");
+  for (const segment of segments) {
+    if (!segment) continue;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return false;
+    }
+    if (decoded === "." || decoded === "..") return false;
+  }
+
+  return ALLOWED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 function isAllowedContentType(contentType: string | undefined): boolean {
@@ -136,6 +160,15 @@ function isAllowedContentType(contentType: string | undefined): boolean {
   // Content-Type may include charset, e.g. "application/json; charset=utf-8"
   const base = contentType.split(";")[0].trim().toLowerCase();
   return ALLOWED_CONTENT_TYPES.includes(base);
+}
+
+/** Redact the per-container token from a raw URL for safe logging. */
+function sanitizePath(rawUrl: string): string {
+  if (!rawUrl.startsWith(PROXY_TOKEN_PREFIX)) return rawUrl;
+  const rest = rawUrl.slice(PROXY_TOKEN_PREFIX.length);
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) return PROXY_TOKEN_PREFIX + "<redacted>";
+  return PROXY_TOKEN_PREFIX + "<redacted>" + rest.slice(slashIdx);
 }
 
 function rejectRequest(
@@ -149,7 +182,7 @@ function rejectRequest(
       event: "credential_proxy_rejected",
       reason,
       sourceIp: req.socket.remoteAddress,
-      path: req.url,
+      path: sanitizePath(req.url ?? ""),
       method: req.method,
     },
     "Proxy request rejected",

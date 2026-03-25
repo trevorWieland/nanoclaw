@@ -421,6 +421,20 @@ describe("path validation", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toBe("bad_path");
   });
+
+  it("rejects percent-encoded path traversal (%2e%2e)", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/%2e%2e/etc/passwd"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toBe("bad_path");
+  });
 });
 
 describe("request validation", () => {
@@ -721,6 +735,28 @@ describe("audit logging", () => {
     );
     expect(deregisterCall).toBeDefined();
     expect((deregisterCall![0] as any).container).toBe(TEST_CONTAINER);
+  });
+
+  it("redacts token from rejection log path", async () => {
+    vi.mocked(logger.warn).mockClear();
+
+    // Trigger a rejection for a valid-token request (e.g. bad method)
+    await makeRequest(proxyPort, {
+      method: "GET",
+      path: tokenPath("/v1/messages"),
+      headers: { "content-type": "application/json" },
+    });
+
+    const warnCalls = vi.mocked(logger.warn).mock.calls;
+    const rejectCall = warnCalls.find(
+      (call) =>
+        typeof call[0] === "object" && (call[0] as any).event === "credential_proxy_rejected",
+    );
+    expect(rejectCall).toBeDefined();
+    const data = rejectCall![0] as Record<string, unknown>;
+    // Token must not appear in the logged path
+    expect(data.path).not.toContain(TEST_TOKEN);
+    expect(data.path).toContain("<redacted>");
   });
 });
 
