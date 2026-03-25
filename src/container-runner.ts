@@ -8,6 +8,7 @@
  * - Main-group project mount stays read-only so agents cannot rewrite host code.
  */
 import { ChildProcess, exec, spawn } from "child_process";
+import { randomBytes } from "crypto";
 import fs from "fs";
 import path from "path";
 
@@ -37,7 +38,11 @@ import {
   readonlyMountArgs,
   stopContainer,
 } from "./container-runtime.js";
-import { detectAuthMode } from "./credential-proxy.js";
+import {
+  detectAuthMode,
+  registerContainerToken,
+  deregisterContainerToken,
+} from "./credential-proxy.js";
 import { validateAdditionalMounts } from "./mount-security.js";
 import { isAuthError, recordAuthFailure, recordAuthSuccess } from "./auth-circuit-breaker.js";
 import {
@@ -280,21 +285,28 @@ interface ContainerArgsOptions {
   containerName: string;
   memoryLimit: string;
   cpuLimit: string;
+  proxyToken: string;
 }
 
 function buildContainerArgs(options: ContainerArgsOptions): string[] {
-  const { mounts, containerName, memoryLimit, cpuLimit } = options;
+  const { mounts, containerName, memoryLimit, cpuLimit, proxyToken } = options;
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
   args.push("--label", `nanoclaw.instance=${INSTANCE_ID}`);
 
   // Pass host timezone so container's local time matches the user's
   args.push("-e", `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
+  // Route API traffic through the credential proxy (containers never see real secrets).
+  // Token is embedded in the URL path so the proxy can authenticate each container.
+  const proxyPrefix = `/proxy/${proxyToken}`;
   if (CREDENTIAL_PROXY_EXTERNAL_URL) {
-    args.push("-e", `ANTHROPIC_BASE_URL=${CREDENTIAL_PROXY_EXTERNAL_URL}`);
+    const baseUrl = CREDENTIAL_PROXY_EXTERNAL_URL.replace(/\/+$/, "");
+    args.push("-e", `ANTHROPIC_BASE_URL=${baseUrl}${proxyPrefix}`);
   } else {
-    args.push("-e", `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+    args.push(
+      "-e",
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}${proxyPrefix}`,
+    );
   }
 
   // Mirror the host's auth method with a placeholder value.
@@ -353,6 +365,11 @@ function buildContainerArgs(options: ContainerArgsOptions): string[] {
   return args;
 }
 
+/** Redact proxy tokens from a container args string for safe logging. */
+function redactContainerArgs(args: string[], proxyToken: string): string {
+  return args.join(" ").replaceAll(proxyToken, "<redacted>");
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -369,19 +386,52 @@ export async function runContainerAgent(
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const memoryLimit = group.containerConfig?.memoryLimit || CONTAINER_MEMORY_LIMIT;
   const cpuLimit = group.containerConfig?.cpuLimit || CONTAINER_CPU_LIMIT;
-  const containerArgs = buildContainerArgs({
-    mounts,
-    containerName,
-    memoryLimit,
-    cpuLimit,
-  });
+  const proxyToken = randomBytes(32).toString("hex");
+  registerContainerToken(containerName, proxyToken);
+
+  // All setup between registration and spawn can throw (buildContainerArgs if
+  // CONTAINER_IMAGE is missing, ContainerInputSchema.parse on bad input).
+  // Deregister the token if any of this fails so we don't leak stale tokens.
+  let containerArgs: string[];
+  let containerInput: ContainerInput;
+  try {
+    containerArgs = buildContainerArgs({
+      mounts,
+      containerName,
+      memoryLimit,
+      cpuLimit,
+      proxyToken,
+    });
+
+    // Rewrite localhost URLs so the container reaches the host via Docker gateway.
+    // Validate before spawning so a schema failure cannot leak an orphan container.
+    const rewriteLocalhostUrl = (url: string) =>
+      url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, `//${CONTAINER_HOST_GATEWAY}`);
+
+    containerInput = ContainerInputSchema.parse({
+      ...input,
+      ...(input.mcpServers
+        ? {
+            mcpServers: Object.fromEntries(
+              Object.entries(input.mcpServers).map(([name, server]) => [
+                name,
+                { ...server, url: rewriteLocalhostUrl(server.url) },
+              ]),
+            ),
+          }
+        : {}),
+    });
+  } catch (err) {
+    deregisterContainerToken(containerName);
+    throw err;
+  }
 
   logger.debug(
     {
       group: group.name,
       containerName,
       mounts: mounts.map((m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? " (ro)" : ""}`),
-      containerArgs: containerArgs.join(" "),
+      containerArgs: redactContainerArgs(containerArgs, proxyToken),
     },
     "Container mount configuration",
   );
@@ -397,26 +447,6 @@ export async function runContainerAgent(
     },
     "Spawning container agent",
   );
-
-  // Rewrite localhost URLs so the container reaches the host via Docker gateway.
-  // Validate before spawning so a schema failure cannot leak an orphan container.
-  const rewriteLocalhostUrl = (url: string) =>
-    url.replace(/\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/, `//${CONTAINER_HOST_GATEWAY}`);
-
-  const containerInput = {
-    ...input,
-    ...(input.mcpServers
-      ? {
-          mcpServers: Object.fromEntries(
-            Object.entries(input.mcpServers).map(([name, server]) => [
-              name,
-              { ...server, url: rewriteLocalhostUrl(server.url) },
-            ]),
-          ),
-        }
-      : {}),
-  };
-  ContainerInputSchema.parse(containerInput);
 
   // Store host-side container logs outside the container-writable group directory.
   // This prevents symlink/hardlink redirection attacks from untrusted group content.
@@ -561,6 +591,7 @@ export async function runContainerAgent(
 
     container.on("close", (code) => {
       clearTimeout(timeout);
+      deregisterContainerToken(containerName);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -668,7 +699,7 @@ export async function runContainerAgent(
         }
         logLines.push(
           `=== Container Args ===`,
-          containerArgs.join(" "),
+          redactContainerArgs(containerArgs, proxyToken),
           ``,
           `=== Mounts ===`,
           mounts
@@ -803,6 +834,7 @@ export async function runContainerAgent(
 
     container.on("error", (err) => {
       clearTimeout(timeout);
+      deregisterContainerToken(containerName);
       logger.error({ group: group.name, containerName, err }, "Container spawn error");
       resolve({
         status: "error",

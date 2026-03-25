@@ -3,6 +3,12 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
+ * Security hardening:
+ * - Per-container token authentication (URL-embedded: /proxy/<token>/...)
+ * - Request validation (path allowlist, method, content-type, body size)
+ * - Per-container rate limiting (sliding window)
+ * - Structured audit logging for every credential injection and rejection
+ *
  * Docs map:
  * - docs/SECURITY.md#5-credential-isolation-credential-proxy
  * - docs/SPEC.md#claude-authentication
@@ -35,6 +41,161 @@ const REFRESH_TIMEOUT_MS = 10_000;
 const REFRESH_MAX_RETRIES = 2;
 const REFRESH_BASE_DELAY_MS = 1_000;
 const RETRYABLE_STATUS = new Set([500, 502, 503, 504]);
+
+// --- Token registry ---
+// Maps token → containerName for O(1) lookup on each request.
+// A reverse map (containerName → token) enables deregistration by name.
+const tokenToContainer = new Map<string, string>();
+const containerToToken = new Map<string, string>();
+
+/** Register a per-container proxy token. Called before spawning. */
+export function registerContainerToken(containerName: string, token: string): void {
+  // Remove any prior token for this container to prevent orphaned valid tokens
+  const existingToken = containerToToken.get(containerName);
+  if (existingToken && existingToken !== token) {
+    tokenToContainer.delete(existingToken);
+  }
+  tokenToContainer.set(token, containerName);
+  containerToToken.set(containerName, token);
+  logger.info(
+    { event: "credential_proxy_register", container: containerName },
+    "Container token registered",
+  );
+}
+
+/** Deregister a container token. Called on container close/error. */
+export function deregisterContainerToken(containerName: string): void {
+  const token = containerToToken.get(containerName);
+  if (token) {
+    tokenToContainer.delete(token);
+    rateLimits.delete(containerName);
+  }
+  containerToToken.delete(containerName);
+  logger.info(
+    { event: "credential_proxy_deregister", container: containerName },
+    "Container token deregistered",
+  );
+}
+
+/** @internal — for tests only. */
+export function _resetTokenRegistryForTests(): void {
+  tokenToContainer.clear();
+  containerToToken.clear();
+  rateLimits.clear();
+}
+
+// --- Rate limiting ---
+// Sliding window: track request timestamps per container name.
+export const RATE_LIMIT_WINDOW_MS = 60_000;
+export const RATE_LIMIT_MAX_REQUESTS = 120;
+
+const rateLimits = new Map<string, number[]>();
+
+function checkRateLimit(containerName: string): boolean {
+  const now = Date.now();
+  let timestamps = rateLimits.get(containerName);
+  if (!timestamps) {
+    timestamps = [];
+    rateLimits.set(containerName, timestamps);
+  }
+  // Prune timestamps outside the window
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  while (timestamps.length > 0 && timestamps[0] <= cutoff) {
+    timestamps.shift();
+  }
+  if (timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+    return false;
+  }
+  timestamps.push(now);
+  return true;
+}
+
+// --- Request validation ---
+export const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_PATH_PREFIXES = ["/v1/", "/api/"];
+const ALLOWED_CONTENT_TYPES = ["application/json", "application/x-www-form-urlencoded"];
+const PROXY_TOKEN_PREFIX = "/proxy/";
+
+/** Extract and validate the proxy token from the URL path.
+ *  Returns { containerName, strippedPath } on success, or null if invalid. */
+function parseProxyToken(url: string): { containerName: string; strippedPath: string } | null {
+  if (!url.startsWith(PROXY_TOKEN_PREFIX)) return null;
+  const rest = url.slice(PROXY_TOKEN_PREFIX.length);
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) return null;
+  const token = rest.slice(0, slashIdx);
+  const strippedPath = rest.slice(slashIdx);
+  const containerName = tokenToContainer.get(token);
+  if (!containerName) return null;
+  return { containerName, strippedPath };
+}
+
+function isAllowedPath(strippedPath: string): boolean {
+  // Parse as URL to isolate pathname from query/fragment
+  let pathname: string;
+  try {
+    pathname = new URL(strippedPath, "http://localhost").pathname;
+  } catch {
+    return false;
+  }
+
+  // Reject path traversal — decode each segment to catch %2e%2e encoding tricks
+  const segments = pathname.split("/");
+  for (const segment of segments) {
+    if (!segment) continue;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(segment);
+    } catch {
+      return false;
+    }
+    if (decoded === "." || decoded === "..") return false;
+    // Reject encoded slashes (%2f) — a segment decoding to e.g. "../etc" would
+    // bypass the traversal check and escape the allowlisted prefix if upstream
+    // normalizes encoded slashes.
+    if (decoded.includes("/")) return false;
+  }
+
+  return ALLOWED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function isAllowedContentType(contentType: string | undefined): boolean {
+  if (!contentType) return false;
+  // Content-Type may include charset, e.g. "application/json; charset=utf-8"
+  const base = contentType.split(";")[0].trim().toLowerCase();
+  return ALLOWED_CONTENT_TYPES.includes(base);
+}
+
+/** Redact the per-container token from a raw URL for safe logging. */
+function sanitizePath(rawUrl: string): string {
+  if (!rawUrl.startsWith(PROXY_TOKEN_PREFIX)) return rawUrl;
+  const rest = rawUrl.slice(PROXY_TOKEN_PREFIX.length);
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) return PROXY_TOKEN_PREFIX + "<redacted>";
+  return PROXY_TOKEN_PREFIX + "<redacted>" + rest.slice(slashIdx);
+}
+
+function rejectRequest(
+  res: import("http").ServerResponse,
+  status: number,
+  reason: string,
+  req: import("http").IncomingMessage,
+): void {
+  logger.warn(
+    {
+      event: "credential_proxy_rejected",
+      reason,
+      sourceIp: req.socket.remoteAddress,
+      path: sanitizePath(req.url ?? ""),
+      method: req.method,
+    },
+    "Proxy request rejected",
+  );
+  res.writeHead(status);
+  res.end(reason);
+}
+
+// --- OAuth refresh ---
 
 let inflightRefresh: Promise<string | null> | null = null;
 
@@ -195,10 +356,88 @@ export function startCredentialProxy(port: number, host = "127.0.0.1"): Promise<
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
+      // --- Pre-body validation (no data read yet) ---
+
+      // 1. Token authentication
+      const parsed = parseProxyToken(req.url || "");
+      if (!parsed) {
+        rejectRequest(res, 403, "invalid_token", req);
+        req.resume(); // drain the request body
+        return;
+      }
+      const { containerName, strippedPath } = parsed;
+
+      // 2. Rate limiting
+      if (!checkRateLimit(containerName)) {
+        rejectRequest(res, 429, "rate_limited", req);
+        req.resume();
+        return;
+      }
+
+      // 3. Method validation
+      if (req.method !== "POST") {
+        rejectRequest(res, 405, "method_not_allowed", req);
+        req.resume();
+        return;
+      }
+
+      // 4. Path validation
+      if (!isAllowedPath(strippedPath)) {
+        rejectRequest(res, 400, "bad_path", req);
+        req.resume();
+        return;
+      }
+
+      // 5. Content-Type validation
+      if (!isAllowedContentType(req.headers["content-type"])) {
+        rejectRequest(res, 415, "unsupported_content_type", req);
+        req.resume();
+        return;
+      }
+
+      // 6. Content-Length early reject
+      const declaredLength = parseInt(req.headers["content-length"] || "0", 10);
+      if (declaredLength > MAX_BODY_SIZE) {
+        rejectRequest(res, 413, "body_too_large", req);
+        req.resume();
+        return;
+      }
+
+      // --- Body collection with size enforcement ---
       const chunks: Buffer[] = [];
-      req.on("data", (c) => chunks.push(c));
+      let bodySize = 0;
+      let aborted = false;
+
+      req.on("data", (c: Buffer) => {
+        bodySize += c.length;
+        if (bodySize > MAX_BODY_SIZE) {
+          if (!aborted) {
+            aborted = true;
+            rejectRequest(res, 413, "body_too_large", req);
+            req.destroy();
+          }
+          return;
+        }
+        chunks.push(c);
+      });
+
       req.on("end", async () => {
+        if (aborted) return;
+
         const body = Buffer.concat(chunks);
+
+        // Audit log: credential injection
+        logger.info(
+          {
+            event: "credential_proxy_request",
+            container: containerName,
+            method: req.method,
+            path: strippedPath,
+            authMode,
+          },
+          "Credential injected",
+        );
+
         const headers: Record<string, string | number | string[] | undefined> = {
           ...(req.headers as Record<string, string>),
           host: upstreamUrl.host,
@@ -229,7 +468,7 @@ export function startCredentialProxy(port: number, host = "127.0.0.1"): Promise<
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: strippedPath,
             method: req.method,
             headers,
           } as RequestOptions,
@@ -240,7 +479,7 @@ export function startCredentialProxy(port: number, host = "127.0.0.1"): Promise<
         );
 
         upstream.on("error", (err) => {
-          logger.error({ err, url: req.url }, "Credential proxy upstream error");
+          logger.error({ err, url: strippedPath }, "Credential proxy upstream error");
           if (!res.headersSent) {
             res.writeHead(502);
             res.end("Bad Gateway");

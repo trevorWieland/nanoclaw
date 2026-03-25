@@ -56,6 +56,8 @@ vi.mock("./container-runtime.js", () => mockRuntime);
 // Mock credential-proxy
 vi.mock("./credential-proxy.js", () => ({
   detectAuthMode: () => "api-key",
+  registerContainerToken: vi.fn(),
+  deregisterContainerToken: vi.fn(),
 }));
 
 // Mock auth-circuit-breaker
@@ -135,6 +137,7 @@ vi.mock("child_process", async () => {
 import { spawn } from "child_process";
 import fs from "fs";
 import { runContainerAgent, ContainerOutput } from "./container-runner.js";
+import { registerContainerToken, deregisterContainerToken } from "./credential-proxy.js";
 import { logger } from "./logger.js";
 import type { RegisteredGroup } from "./types.js";
 
@@ -490,14 +493,16 @@ describe("container-runner CREDENTIAL_PROXY_EXTERNAL_URL", () => {
     vi.useRealTimers();
   });
 
-  it("uses host gateway URL when CREDENTIAL_PROXY_EXTERNAL_URL is empty", async () => {
+  it("uses host gateway URL with proxy token when CREDENTIAL_PROXY_EXTERNAL_URL is empty", async () => {
     mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "";
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
     const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
     const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
-    expect(baseUrlArg).toBe(
-      `ANTHROPIC_BASE_URL=http://host.docker.internal:${mockConfig.CREDENTIAL_PROXY_PORT}`,
+    expect(baseUrlArg).toMatch(
+      new RegExp(
+        `^ANTHROPIC_BASE_URL=http://host\\.docker\\.internal:${mockConfig.CREDENTIAL_PROXY_PORT}/proxy/[a-f0-9]{64}$`,
+      ),
     );
 
     fakeProc.emit("close", 0);
@@ -505,13 +510,28 @@ describe("container-runner CREDENTIAL_PROXY_EXTERNAL_URL", () => {
     await resultPromise;
   });
 
-  it("uses CREDENTIAL_PROXY_EXTERNAL_URL as ANTHROPIC_BASE_URL when set", async () => {
+  it("uses CREDENTIAL_PROXY_EXTERNAL_URL with proxy token when set", async () => {
     mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "http://nanoclaw:3001";
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
     const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
     const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
-    expect(baseUrlArg).toBe("ANTHROPIC_BASE_URL=http://nanoclaw:3001");
+    expect(baseUrlArg).toMatch(/^ANTHROPIC_BASE_URL=http:\/\/nanoclaw:3001\/proxy\/[a-f0-9]{64}$/);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("normalizes trailing slash on CREDENTIAL_PROXY_EXTERNAL_URL", async () => {
+    mockRuntime.CREDENTIAL_PROXY_EXTERNAL_URL = "http://nanoclaw:3001/";
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
+    // Must NOT contain double-slash before /proxy/
+    expect(baseUrlArg).toMatch(/^ANTHROPIC_BASE_URL=http:\/\/nanoclaw:3001\/proxy\/[a-f0-9]{64}$/);
+    expect(baseUrlArg).not.toContain("//proxy/");
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);
@@ -1022,5 +1042,103 @@ describe("container-runner OOM detection", () => {
       .mocked(logger.warn)
       .mock.calls.filter(([, msg]) => typeof msg === "string" && msg.includes("possible OOM"));
     expect(oomCalls).toHaveLength(0);
+  });
+});
+
+describe("container-runner proxy token lifecycle", () => {
+  beforeEach(() => {
+    resetMocks();
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    vi.mocked(spawn).mockClear();
+    vi.mocked(registerContainerToken).mockClear();
+    vi.mocked(deregisterContainerToken).mockClear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("registers proxy token before spawning container", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    // registerContainerToken should have been called before spawn
+    expect(registerContainerToken).toHaveBeenCalledTimes(1);
+    const [containerName, token] = vi.mocked(registerContainerToken).mock.calls[0];
+    expect(containerName).toMatch(/^nanoclaw-test-group-/);
+    expect(token).toMatch(/^[a-f0-9]{64}$/);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("deregisters proxy token on container close", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(deregisterContainerToken).toHaveBeenCalledTimes(1);
+    const containerName = vi.mocked(deregisterContainerToken).mock.calls[0][0];
+    expect(containerName).toMatch(/^nanoclaw-test-group-/);
+  });
+
+  it("deregisters proxy token on container error", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    fakeProc.emit("error", new Error("spawn failed"));
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(deregisterContainerToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("embeds proxy token in ANTHROPIC_BASE_URL", async () => {
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0][1] as string[];
+    const baseUrlArg = spawnArgs.find((arg) => arg.startsWith("ANTHROPIC_BASE_URL="));
+    expect(baseUrlArg).toMatch(/\/proxy\/[a-f0-9]{64}$/);
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it("deregisters proxy token when pre-spawn setup throws", async () => {
+    // CONTAINER_IMAGE being empty causes buildContainerArgs to throw
+    mockConfig.CONTAINER_IMAGE = "";
+
+    await expect(runContainerAgent(testGroup, testInput, () => {})).rejects.toThrow(
+      "CONTAINER_IMAGE is required",
+    );
+
+    // Token was registered then deregistered on the setup failure
+    expect(registerContainerToken).toHaveBeenCalledTimes(1);
+    expect(deregisterContainerToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts proxy token from debug log of container args", async () => {
+    vi.mocked(logger.debug).mockClear();
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    // Extract the token that was registered
+    const token = vi.mocked(registerContainerToken).mock.calls[0][1];
+
+    // Check the debug log does not contain the raw token
+    const debugCalls = vi.mocked(logger.debug).mock.calls;
+    const mountConfigCall = debugCalls.find(
+      (call) => typeof call[1] === "string" && call[1] === "Container mount configuration",
+    );
+    expect(mountConfigCall).toBeDefined();
+    const data = mountConfigCall![0] as Record<string, unknown>;
+    expect(data.containerArgs).not.toContain(token);
+    expect(data.containerArgs).toContain("<redacted>");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });

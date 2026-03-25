@@ -52,13 +52,16 @@ export function recordAuthFailure(): void {
   logger.warn({ consecutiveFailures, max: MAX_FAILURES }, "Auth failure recorded");
   if (consecutiveFailures >= MAX_FAILURES && circuitOpenSince === null) {
     circuitOpenSince = Date.now();
-    logger.error({ consecutiveFailures }, "Auth circuit breaker OPEN — blocking token reads");
+    logger.error(
+      { event: "circuit_breaker_open", consecutiveFailures },
+      "Auth circuit breaker OPEN — blocking token reads",
+    );
   }
 }
 
 export function recordAuthSuccess(): void {
   if (consecutiveFailures > 0 || circuitOpenSince !== null) {
-    logger.info("Auth circuit breaker reset on success");
+    logger.info({ event: "circuit_breaker_reset" }, "Auth circuit breaker reset on success");
   }
   consecutiveFailures = 0;
   circuitOpenSince = null;
@@ -72,7 +75,10 @@ export function checkCircuit(): { allowed: boolean; reason?: string } {
   // Auto-reset after timeout
   const elapsed = Date.now() - circuitOpenSince;
   if (elapsed >= RESET_TIMEOUT_MS) {
-    logger.info({ elapsedMs: elapsed }, "Auth circuit breaker auto-reset after timeout");
+    logger.info(
+      { event: "circuit_breaker_auto_reset", elapsedMs: elapsed },
+      "Auth circuit breaker auto-reset after timeout",
+    );
     consecutiveFailures = 0;
     circuitOpenSince = null;
     return { allowed: true };
