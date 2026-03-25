@@ -435,6 +435,20 @@ describe("path validation", () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toBe("bad_path");
   });
+
+  it("rejects encoded-slash traversal (%2e%2e%2f)", async () => {
+    const res = await makeRequest(
+      proxyPort,
+      {
+        method: "POST",
+        path: tokenPath("/v1/%2e%2e%2fetc/passwd"),
+        headers: { "content-type": "application/json" },
+      },
+      "{}",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toBe("bad_path");
+  });
 });
 
 describe("request validation", () => {

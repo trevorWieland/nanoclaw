@@ -1119,4 +1119,26 @@ describe("container-runner proxy token lifecycle", () => {
     expect(registerContainerToken).toHaveBeenCalledTimes(1);
     expect(deregisterContainerToken).toHaveBeenCalledTimes(1);
   });
+
+  it("redacts proxy token from debug log of container args", async () => {
+    vi.mocked(logger.debug).mockClear();
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {});
+
+    // Extract the token that was registered
+    const token = vi.mocked(registerContainerToken).mock.calls[0][1];
+
+    // Check the debug log does not contain the raw token
+    const debugCalls = vi.mocked(logger.debug).mock.calls;
+    const mountConfigCall = debugCalls.find(
+      (call) => typeof call[1] === "string" && call[1] === "Container mount configuration",
+    );
+    expect(mountConfigCall).toBeDefined();
+    const data = mountConfigCall![0] as Record<string, unknown>;
+    expect(data.containerArgs).not.toContain(token);
+    expect(data.containerArgs).toContain("<redacted>");
+
+    fakeProc.emit("close", 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
 });

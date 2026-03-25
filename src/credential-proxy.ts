@@ -150,6 +150,10 @@ function isAllowedPath(strippedPath: string): boolean {
       return false;
     }
     if (decoded === "." || decoded === "..") return false;
+    // Reject encoded slashes (%2f) — a segment decoding to e.g. "../etc" would
+    // bypass the traversal check and escape the allowlisted prefix if upstream
+    // normalizes encoded slashes.
+    if (decoded.includes("/")) return false;
   }
 
   return ALLOWED_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix));

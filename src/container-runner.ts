@@ -365,6 +365,11 @@ function buildContainerArgs(options: ContainerArgsOptions): string[] {
   return args;
 }
 
+/** Redact proxy tokens from a container args string for safe logging. */
+function redactContainerArgs(args: string[], proxyToken: string): string {
+  return args.join(" ").replaceAll(proxyToken, "<redacted>");
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -426,7 +431,7 @@ export async function runContainerAgent(
       group: group.name,
       containerName,
       mounts: mounts.map((m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? " (ro)" : ""}`),
-      containerArgs: containerArgs.join(" "),
+      containerArgs: redactContainerArgs(containerArgs, proxyToken),
     },
     "Container mount configuration",
   );
@@ -694,7 +699,7 @@ export async function runContainerAgent(
         }
         logLines.push(
           `=== Container Args ===`,
-          containerArgs.join(" "),
+          redactContainerArgs(containerArgs, proxyToken),
           ``,
           `=== Mounts ===`,
           mounts
