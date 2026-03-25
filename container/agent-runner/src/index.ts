@@ -659,6 +659,18 @@ async function runQuery(
   }
 
   ipcPolling = false;
+
+  // An async poll callback may still be in-flight (inside await shouldClose/drainIpcInput).
+  // Yield once so it can finish and update closedDuringQuery before we read the value.
+  await new Promise((r) => setTimeout(r, 0));
+
+  // Also re-check the sentinel directly in case _close arrived after the last poll
+  // but before we stopped polling — avoids a missed shutdown.
+  if (!closedDuringQuery && (await shouldClose())) {
+    log("Close sentinel found after query completion");
+    closedDuringQuery = true;
+  }
+
   log(
     `Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || "none"}, closedDuringQuery: ${closedDuringQuery}`,
   );
