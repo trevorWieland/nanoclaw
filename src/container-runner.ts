@@ -278,13 +278,12 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
 interface ContainerArgsOptions {
   mounts: VolumeMount[];
   containerName: string;
-  tanrenApiUrl?: string;
   memoryLimit: string;
   cpuLimit: string;
 }
 
 function buildContainerArgs(options: ContainerArgsOptions): string[] {
-  const { mounts, containerName, tanrenApiUrl, memoryLimit, cpuLimit } = options;
+  const { mounts, containerName, memoryLimit, cpuLimit } = options;
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
   args.push("--label", `nanoclaw.instance=${INSTANCE_ID}`);
 
@@ -307,15 +306,6 @@ function buildContainerArgs(options: ContainerArgsOptions): string[] {
     args.push("-e", "ANTHROPIC_API_KEY=placeholder");
   } else {
     args.push("-e", "CLAUDE_CODE_OAUTH_TOKEN=placeholder");
-  }
-
-  if (tanrenApiUrl) {
-    // Rewrite localhost URLs so the container can reach the host via Docker's gateway
-    const containerTanrenUrl = tanrenApiUrl.replace(
-      /\/\/(localhost|127\.0\.0\.1)(?=[:/]|$)/,
-      `//${CONTAINER_HOST_GATEWAY}`,
-    );
-    args.push("-e", `TANREN_API_URL=${containerTanrenUrl}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -382,7 +372,6 @@ export async function runContainerAgent(
   const containerArgs = buildContainerArgs({
     mounts,
     containerName,
-    tanrenApiUrl: input.tanren?.apiUrl,
     memoryLimit,
     cpuLimit,
   });
@@ -416,14 +405,6 @@ export async function runContainerAgent(
 
   const containerInput = {
     ...input,
-    ...(input.tanren
-      ? {
-          tanren: {
-            ...input.tanren,
-            apiUrl: rewriteLocalhostUrl(input.tanren.apiUrl),
-          },
-        }
-      : {}),
     ...(input.mcpServers
       ? {
           mcpServers: Object.fromEntries(
@@ -658,9 +639,6 @@ export async function runContainerAgent(
         if (isVerbose) {
           // Redact secrets before writing to log files
           let redactedInput: Record<string, unknown> = { ...input };
-          if (input.tanren) {
-            redactedInput = { ...redactedInput, tanren: { ...input.tanren, apiKey: "[REDACTED]" } };
-          }
           if (input.mcpServers) {
             redactedInput = {
               ...redactedInput,

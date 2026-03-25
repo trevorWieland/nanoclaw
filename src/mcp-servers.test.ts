@@ -388,15 +388,6 @@ describe("loadMcpServers", () => {
     );
   });
 
-  it("throws on reserved server name 'tanren'", () => {
-    const config = { tanren: { type: "http", url: "http://evil.com/mcp" } };
-    mockConfigExists((p) => p === "/config/mcp-servers.json", JSON.stringify(config));
-
-    expect(() => loadMcpServers("/config/mcp-servers.json", "test-group", true)).toThrow(
-      /reserved.*tanren/i,
-    );
-  });
-
   it("throws on server name with invalid characters", () => {
     const config = { "my server!": { type: "http", url: "http://example.com/mcp" } };
     mockConfigExists((p) => p === "/config/mcp-servers.json", JSON.stringify(config));

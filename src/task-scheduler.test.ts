@@ -78,7 +78,6 @@ function createMockDeps(overrides?: Partial<SchedulerDependencies>): SchedulerDe
     } as any,
     onProcess: vi.fn(),
     sendMessage: vi.fn(async () => {}),
-    readTanrenConfig: () => undefined,
     readMcpServersConfig: () => undefined,
     runAgent: vi.fn(async () => ({ status: "success" as const, result: null })),
     ...overrides,
