@@ -885,7 +885,9 @@ async function main(): Promise<void> {
     // and any drained IPC messages appended) rather than containerInput.prompt,
     // so pending user messages are not silently lost.
     log("Script wakeAgent=true, enriching prompt with data");
-    prompt = `${prompt}\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}`;
+    if (scriptResult.data !== undefined) {
+      prompt = `${prompt}\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}`;
+    }
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat

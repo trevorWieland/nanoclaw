@@ -20,7 +20,12 @@ function parseArgs(args: string[]): { list: boolean; limit: number } {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--list") list = true;
     if (args[i] === "--limit" && args[i + 1]) {
-      limit = parseInt(args[i + 1], 10);
+      const parsed = parseInt(args[i + 1], 10);
+      if (Number.isNaN(parsed) || parsed <= 0) {
+        logger.warn({ value: args[i + 1] }, "Invalid --limit value, using default");
+      } else {
+        limit = parsed;
+      }
       i++;
     }
   }

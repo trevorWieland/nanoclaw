@@ -258,6 +258,10 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
+  } else {
+    // Ensure the mount target exists even when the source directory is absent
+    // (e.g., dist-only packaging). Prevents ENOENT in mount and chown steps.
+    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: resolveHostPath(groupAgentRunnerDir),

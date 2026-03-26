@@ -4,15 +4,14 @@
  * Emits NEEDS_USER_INPUT=true when autodetection fails.
  */
 import fs from "fs";
-import path from "path";
 
 import { isValidTimezone } from "../src/timezone.js";
 import { logger } from "../src/logger.js";
+import { ENV_FILE_PATH } from "../src/runtime-paths.js";
 import { emitStatus } from "./status.js";
 
 export async function run(args: string[]): Promise<void> {
-  const projectRoot = process.cwd();
-  const envFile = path.join(projectRoot, ".env");
+  const envFile = ENV_FILE_PATH;
 
   // Check what's already in .env
   let envFileTz: string | undefined;
