@@ -100,6 +100,12 @@ const MIGRATIONS: Migration[] = [
       `;
     },
   },
+  {
+    version: 2,
+    up: async (sql) => {
+      await sql`ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS script TEXT`;
+    },
+  },
 ];
 
 export class PostgresAdapter implements DataStore {

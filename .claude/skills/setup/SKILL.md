@@ -156,17 +156,17 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Anthropic Credentials via OneCLI
+## 4. Anthropic Credentials via Credential Proxy
 
-NanoClaw uses OneCLI to manage credentials — API keys are never stored in `.env` or exposed to containers. The OneCLI gateway injects them at request time.
+NanoClaw uses a built-in credential proxy (`src/credential-proxy.ts`) to manage credentials. API keys or OAuth tokens are stored in `.env` and injected into container API requests via per-container bearer tokens — containers never see real keys.
 
-Check if a secret already exists:
+Check if credentials are already configured:
 
 ```bash
-onecli secrets list
+grep -E '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env 2>/dev/null
 ```
 
-If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
+If a credential is found, confirm with user: keep or reconfigure? If keeping, skip to step 5.
 
 AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
 
@@ -177,27 +177,41 @@ AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an
 
 Tell the user to run `claude setup-token` in another terminal and copy the token it outputs. Do NOT collect the token in chat.
 
-Once they have the token, they register it with OneCLI. AskUserQuestion with two options:
+Once they have the token, add it to `.env`:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI. Use type 'anthropic' and paste your token as the value."
-2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_TOKEN --host-pattern api.anthropic.com`"
+```bash
+# Remove any existing Anthropic credential lines, then add the OAuth token
+sed -i '/^ANTHROPIC_API_KEY=/d; /^CLAUDE_CODE_OAUTH_TOKEN=/d' .env 2>/dev/null
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+The credential proxy also supports short-lived tokens from `~/.claude/.credentials.json` (created by `/login`) and will auto-refresh them when expired.
 
 ### API key path
 
 Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
 
-Then AskUserQuestion with two options:
+Once they have the key, add it to `.env`:
 
-1. **Dashboard** — description: "Best if you have a browser on this machine. Open http://127.0.0.1:10254 and add the secret in the UI."
-2. **CLI** — description: "Best for remote/headless servers. Run: `onecli secrets create --name Anthropic --type anthropic --value YOUR_KEY --host-pattern api.anthropic.com`"
+```bash
+# Remove any existing Anthropic credential lines, then add the API key
+sed -i '/^ANTHROPIC_API_KEY=/d; /^CLAUDE_CODE_OAUTH_TOKEN=/d' .env 2>/dev/null
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
 
 ### After either path
 
 Ask them to let you know when done.
 
-**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
+**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — write it to `.env` on their behalf using the appropriate variable name.
 
-**After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
+**After user confirms:** verify credentials are set:
+
+```bash
+grep -E '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env
+```
+
+If not found, ask again.
 
 ## 5. Set Up Channels
 

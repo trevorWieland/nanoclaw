@@ -8,7 +8,7 @@ The files in this directory are original design documents and developer referenc
 | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | [SPEC.md](SPEC.md)                                             | [Architecture](https://docs.nanoclaw.dev/concepts/architecture)           |
 | [SECURITY.md](SECURITY.md)                                     | [Security model](https://docs.nanoclaw.dev/concepts/security)             |
-| [REQUIREMENTS.md](REQUIREMENTS.md)                             | [Introduction](https://docs.nanoclaw.dev/introduction)                    |
+| _(removed)_                                                    | [Introduction](https://docs.nanoclaw.dev/introduction)                    |
 | [skills-as-branches.md](skills-as-branches.md)                 | [Skills system](https://docs.nanoclaw.dev/integrations/skills-system)     |
 | [DEBUG_CHECKLIST.md](DEBUG_CHECKLIST.md)                       | [Troubleshooting](https://docs.nanoclaw.dev/advanced/troubleshooting)     |
 | [docker-sandboxes.md](docker-sandboxes.md)                     | [Docker Sandboxes](https://docs.nanoclaw.dev/advanced/docker-sandboxes)   |

@@ -346,6 +346,22 @@ def main():
         else:
             sys.exit("error: no group specified and no main group found. Use -g or -j.")
 
+    # Fallback: resolve group_folder from jid when -j was used directly
+    if group_folder is None and jid:
+        match = [g for g in groups if g["jid"] == jid]
+        if match:
+            group_name = match[0]["name"]
+            group_folder = match[0]["folder"]
+            is_main = match[0]["is_main"]
+        else:
+            # JID not in DB — scan store/groups for a folder containing this JID
+            groups_dir = NANOCLAW_DIR / "groups"
+            if groups_dir.is_dir():
+                folders = sorted(p.name for p in groups_dir.iterdir() if p.is_dir())
+                if folders:
+                    group_folder = folders[0]
+                    dbg(f"jid '{jid}' not in DB, defaulting to first group folder: {group_folder}")
+
     runtime = detect_runtime(args.runtime)
     secrets = read_secrets(ENV_FILE)
 
@@ -358,8 +374,8 @@ def main():
         "isMain": is_main,
         "secrets": secrets,
     }
-    if group_name:
-        payload["groupFolder"] = group_name
+    if group_folder:
+        payload["groupFolder"] = group_folder
     if args.session:
         payload["sessionId"] = args.session
         payload["resumeAt"] = "latest"
