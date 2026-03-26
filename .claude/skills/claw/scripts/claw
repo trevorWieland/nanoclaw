@@ -137,9 +137,18 @@ def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
 
     agent_runner_src = sessions_dir / "agent-runner-src"
     project_agent_runner = NANOCLAW_DIR / "container" / "agent-runner" / "src"
-    if not agent_runner_src.exists() and project_agent_runner.exists():
+    if project_agent_runner.exists():
         import shutil
-        shutil.copytree(project_agent_runner, agent_runner_src)
+        # Refresh cache when source is newer (mtime-aware, mirrors container-runner.ts)
+        needs_copy = not agent_runner_src.exists()
+        if not needs_copy:
+            src_max = max((f.stat().st_mtime for f in project_agent_runner.iterdir()), default=0)
+            cached_max = max((f.stat().st_mtime for f in agent_runner_src.iterdir()), default=0)
+            needs_copy = src_max > cached_max
+        if needs_copy:
+            if agent_runner_src.exists():
+                shutil.rmtree(agent_runner_src)
+            shutil.copytree(project_agent_runner, agent_runner_src)
 
     mounts: list[tuple[str, str, bool]] = []
     if is_main:

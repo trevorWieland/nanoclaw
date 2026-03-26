@@ -9,6 +9,7 @@ import {
   IDLE_TIMEOUT,
   MAX_PROMPT_MESSAGES,
   TIMEZONE,
+  TRIGGER_PATTERN,
   getTriggerPattern,
 } from "./config.js";
 import type { AvailableGroup, ContainerOutput } from "./container-runner.js";
@@ -249,7 +250,9 @@ export function createGroupProcessor(
         },
         formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
         canSenderInteract: (msg) => {
-          const hasTrigger = getTriggerPattern(group.trigger).test(msg.content.trim());
+          const content = msg.content.trim();
+          const hasTrigger =
+            getTriggerPattern(group.trigger).test(content) || TRIGGER_PATTERN.test(content);
           const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
           return (
             isMainGroup ||
@@ -322,9 +325,12 @@ export function createGroupProcessor(
       if (!isTailDrain) {
         // Normal path: require a trigger
         const allowlistCfg = loadSenderAllowlist();
+        const groupTrigger = getTriggerPattern(group.trigger);
         const triggerIdx = missedMessages.findIndex(
           (m) =>
-            getTriggerPattern(group.trigger).test(m.content.trim()) &&
+            // Match group-specific trigger OR the default trigger (covers
+            // Discord mention rewrites which always prepend @ASSISTANT_NAME).
+            (groupTrigger.test(m.content.trim()) || TRIGGER_PATTERN.test(m.content.trim())) &&
             (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
         );
         if (triggerIdx < 0) {
