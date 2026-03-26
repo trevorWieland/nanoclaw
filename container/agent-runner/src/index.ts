@@ -876,9 +876,12 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Script says wake agent — enrich prompt with script data
+    // Script says wake agent — enrich prompt with script data.
+    // Use the current `prompt` (which already has the [SCHEDULED TASK] prefix
+    // and any drained IPC messages appended) rather than containerInput.prompt,
+    // so pending user messages are not silently lost.
     log("Script wakeAgent=true, enriching prompt with data");
-    prompt = `[SCHEDULED TASK]\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}\n\nInstructions:\n${containerInput.prompt}`;
+    prompt = `${prompt}\n\nScript output:\n${JSON.stringify(scriptResult.data, null, 2)}`;
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat

@@ -13,6 +13,8 @@ describe("claw skill script", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-skill-test-"));
       const binDir = path.join(tempDir, "bin");
       fs.mkdirSync(binDir, { recursive: true });
+      // Create a groups dir so claw can resolve a fallback group folder
+      fs.mkdirSync(path.join(tempDir, "groups", "test-group"), { recursive: true });
 
       const runtimePath = path.join(binDir, "container");
       fs.writeFileSync(

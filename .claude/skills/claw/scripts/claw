@@ -154,8 +154,13 @@ def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
 
 def run_container(runtime: str, image: str, payload: dict,
                   folder: str | None = None, is_main: bool = False,
-                  timeout: int = 300) -> None:
+                  timeout: int = 300, secrets: dict | None = None) -> None:
     cmd = [runtime, "run", "-i", "--rm"]
+    # Inject credentials as container env vars so agent-runner can read them
+    # from process.env (mirrors how container-runner.ts injects via -e flags).
+    if secrets:
+        for key, val in secrets.items():
+            cmd += ["-e", f"{key}={val}"]
     if folder:
         for host, container, readonly in build_mounts(folder, is_main):
             if readonly:
@@ -165,11 +170,8 @@ def run_container(runtime: str, image: str, payload: dict,
     cmd.append(image)
     dbg(f"cmd: {' '.join(cmd)}")
 
-    # Show payload sans secrets
     if VERBOSE:
-        safe = {k: v for k, v in payload.items() if k != "secrets"}
-        safe["secrets"] = {k: "***" for k in payload.get("secrets", {})}
-        dbg(f"payload: {json.dumps(safe, indent=2)}")
+        dbg(f"payload: {json.dumps(payload, indent=2)}")
 
     proc = subprocess.Popen(
         cmd,
@@ -368,14 +370,15 @@ def main():
     if not secrets:
         print("warning: no secrets found in .env — agent may not be authenticated", file=sys.stderr)
 
+    if not group_folder:
+        sys.exit(f"error: could not resolve a group folder for jid '{jid}'. Register the group first or use -g.")
+
     payload: dict = {
         "prompt": prompt,
         "chatJid": jid,
         "isMain": is_main,
-        "secrets": secrets,
+        "groupFolder": group_folder,
     }
-    if group_folder:
-        payload["groupFolder"] = group_folder
     if args.session:
         payload["sessionId"] = args.session
         payload["resumeAt"] = "latest"
@@ -383,7 +386,7 @@ def main():
     print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
     run_container(runtime, args.image, payload,
                   folder=group_folder, is_main=is_main,
-                  timeout=args.timeout)
+                  timeout=args.timeout, secrets=secrets)
 
 
 if __name__ == "__main__":
