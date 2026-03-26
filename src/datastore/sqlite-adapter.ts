@@ -222,8 +222,8 @@ export class SqliteAdapter implements DataStore {
     this.db
       .prepare(
         `
-      INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       )
       .run(
@@ -231,6 +231,7 @@ export class SqliteAdapter implements DataStore {
         task.group_folder,
         task.chat_jid,
         task.prompt,
+        task.script || null,
         task.schedule_type,
         task.schedule_value,
         task.context_mode || "isolated",
@@ -255,7 +256,10 @@ export class SqliteAdapter implements DataStore {
   async updateTask(
     id: string,
     updates: Partial<
-      Pick<ScheduledTask, "prompt" | "schedule_type" | "schedule_value" | "next_run" | "status">
+      Pick<
+        ScheduledTask,
+        "prompt" | "script" | "schedule_type" | "schedule_value" | "next_run" | "status"
+      >
     >,
   ): Promise<void> {
     const fields: string[] = [];
@@ -264,6 +268,10 @@ export class SqliteAdapter implements DataStore {
     if (updates.prompt !== undefined) {
       fields.push("prompt = ?");
       values.push(updates.prompt);
+    }
+    if (updates.script !== undefined) {
+      fields.push("script = ?");
+      values.push(updates.script || null);
     }
     if (updates.schedule_type !== undefined) {
       fields.push("schedule_type = ?");
@@ -537,6 +545,13 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
     // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }
 
+  // Add script column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN script TEXT`);
+  } catch {
+    // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`);
@@ -564,7 +579,7 @@ export function createSqliteSchema(database: Database.Database, assistantName: s
       `UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`,
     );
     database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
-    database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
+    database.exec(`UPDATE chats SET channel = 'telegram', is_group = 0 WHERE jid LIKE 'tg:%'`);
   } catch {
     // Intentionally suppressed: SQLite lacks IF NOT EXISTS for ADD COLUMN
   }

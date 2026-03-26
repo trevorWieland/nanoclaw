@@ -84,6 +84,7 @@ export interface SchedulerDependencies {
       isMain: boolean;
       isScheduledTask?: boolean;
       assistantName: string;
+      script?: string;
       mcpServers?: Record<
         string,
         { type: "http" | "sse"; url: string; headers?: Record<string, string> }
@@ -147,6 +148,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
       id: t.id,
       groupFolder: t.group_folder,
       prompt: t.prompt,
+      script: t.script,
       schedule_type: t.schedule_type,
       schedule_value: t.schedule_value,
       status: t.status,
@@ -189,6 +191,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         mcpServers: mcpServersConfig,
+        script: task.script || undefined,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

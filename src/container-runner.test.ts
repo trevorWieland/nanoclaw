@@ -382,59 +382,49 @@ describe("container-runner agent-runner sync", () => {
     vi.useRealTimers();
   });
 
-  it("syncs new upstream files without overwriting existing ones", async () => {
-    // Simulate: agent-runner source has 3 files, session dir already has 2 of them
-    const existingFiles = new Set([
-      "/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src/agent.ts",
-      "/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src/tools.ts",
-    ]);
-
+  it("refreshes agent-runner cache when any source file is newer than cached", async () => {
+    // maxMtime compares all files in src vs cached dir
     vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
       const s = p.toString();
-      // agent-runner source dir exists
       if (s.endsWith("container/agent-runner/src")) return true;
-      // skills source dir — not relevant for this test
+      if (s.endsWith("agent-runner-src")) return true;
       if (s.includes("container/skills")) return false;
-      // global dir
       if (s.endsWith("/global")) return false;
-      // .env file
       if (s.endsWith(".env")) return false;
-      // settings.json doesn't exist yet (let it be created)
       if (s.endsWith("settings.json")) return false;
-      // Existing files in session dir
-      if (existingFiles.has(s)) return true;
-      // New file doesn't exist yet
-      if (s.endsWith("new-helper.ts")) return false;
       return false;
     });
 
     vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
       const s = p.toString();
-      if (s.endsWith("container/agent-runner/src")) {
-        return ["agent.ts", "tools.ts", "new-helper.ts"];
-      }
-      if (s.includes("container/skills")) {
-        return [];
-      }
+      if (s.endsWith("container/agent-runner/src")) return ["index.ts", "ipc-mcp-stdio.ts"];
+      if (s.endsWith("agent-runner-src")) return ["index.ts", "ipc-mcp-stdio.ts"];
       return [];
     }) as typeof fs.readdirSync);
 
-    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
+    vi.mocked(fs.statSync).mockImplementation(((p: fs.PathLike) => {
+      const s = p.toString();
+      // ipc-mcp-stdio.ts is newer in source (2000) than cached (1000)
+      if (s.includes("container/agent-runner/src/ipc-mcp-stdio.ts")) {
+        return { isDirectory: () => false, mtimeMs: 2000 } as fs.Stats;
+      }
+      // index.ts is same age in both
+      if (s.includes("index.ts")) {
+        return { isDirectory: () => false, mtimeMs: 1000 } as fs.Stats;
+      }
+      if (s.includes("ipc-mcp-stdio.ts")) {
+        return { isDirectory: () => false, mtimeMs: 1000 } as fs.Stats;
+      }
+      return { isDirectory: () => true, mtimeMs: 1000 } as fs.Stats;
+    }) as typeof fs.statSync);
 
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
-    // Only the new file should be copied
     const cpCalls = vi.mocked(fs.cpSync).mock.calls;
-    const copiedFiles = cpCalls
-      .filter(([src]) => src.toString().includes("agent-runner"))
-      .map(([src]) => src.toString());
+    const agentRunnerCopies = cpCalls.filter(([src]) => src.toString().includes("agent-runner"));
 
-    expect(copiedFiles).toHaveLength(1);
-    expect(copiedFiles[0]).toContain("new-helper.ts");
-
-    // Existing files should NOT have been overwritten
-    expect(copiedFiles.some((f) => f.endsWith("agent.ts"))).toBe(false);
-    expect(copiedFiles.some((f) => f.endsWith("tools.ts"))).toBe(false);
+    expect(agentRunnerCopies).toHaveLength(1);
+    expect(agentRunnerCopies[0][2]).toEqual({ recursive: true });
 
     fakeProc.emit("close", 0);
     await vi.advanceTimersByTimeAsync(10);

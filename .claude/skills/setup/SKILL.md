@@ -60,9 +60,9 @@ Already configured. Continue.
 
 Run `bash setup.sh` and parse the status block.
 
-- If NODE_OK=false → Node.js is missing or too old. Use `AskUserQuestion: Would you like me to install Node.js 22?` If confirmed:
-  - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
-  - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
+- If NODE_OK=false → Node.js is missing or too old. Use `AskUserQuestion: Would you like me to install Node.js 24?` If confirmed:
+  - macOS: `brew install node@24` (if brew available) or install nvm then `nvm install 24`
+  - Linux: `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
   - After installing Node, re-run `bash setup.sh`
 - If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
 - If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
@@ -75,6 +75,13 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 - If HAS_AUTH=true → WhatsApp is already configured, note for step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
+
+## 2a. Timezone
+
+Run `npx tsx setup/index.ts --step timezone` and parse the status block.
+
+- If NEEDS_USER_INPUT=true → The system timezone could not be autodetected (e.g. POSIX-style TZ like `IST-2`). AskUserQuestion: "What is your timezone?" with common options (America/New_York, Europe/London, Asia/Jerusalem, Asia/Tokyo) and an "Other" escape. Then re-run: `npx tsx setup/index.ts --step timezone -- --tz <their-answer>`.
+- If STATUS=success → Timezone is configured. Note RESOLVED_TZ for reference.
 
 ## 3. Container Runtime
 
@@ -119,15 +126,62 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Anthropic Credentials via Credential Proxy
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+NanoClaw uses a built-in credential proxy (`src/credential-proxy.ts`) to manage credentials. API keys or OAuth tokens are stored in `.env` and injected into container API requests via per-container bearer tokens — containers never see real keys.
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+Check if credentials are already configured:
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+```bash
+grep -E '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env 2>/dev/null
+```
 
-**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+If a credential is found, confirm with user: keep or reconfigure? If keeping, skip to step 5.
+
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+
+1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. You'll run `claude setup-token` in another terminal to get your token."
+2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+
+### Subscription path
+
+Tell the user to run `claude setup-token` in another terminal and copy the token it outputs. Do NOT collect the token in chat.
+
+Once they have the token, add it to `.env`:
+
+```bash
+# Remove any existing Anthropic credential lines, then add the OAuth token
+sed -i '/^ANTHROPIC_API_KEY=/d; /^CLAUDE_CODE_OAUTH_TOKEN=/d' .env 2>/dev/null
+echo 'CLAUDE_CODE_OAUTH_TOKEN=<their-token>' >> .env
+```
+
+The credential proxy also supports short-lived tokens from `~/.claude/.credentials.json` (created by `/login`) and will auto-refresh them when expired.
+
+### API key path
+
+Tell the user to get an API key from https://console.anthropic.com/settings/keys if they don't have one.
+
+Once they have the key, add it to `.env`:
+
+```bash
+# Remove any existing Anthropic credential lines, then add the API key
+sed -i '/^ANTHROPIC_API_KEY=/d; /^CLAUDE_CODE_OAUTH_TOKEN=/d' .env 2>/dev/null
+echo 'ANTHROPIC_API_KEY=<their-key>' >> .env
+```
+
+### After either path
+
+Ask them to let you know when done.
+
+**If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — write it to `.env` on their behalf using the appropriate variable name.
+
+**After user confirms:** verify credentials are set:
+
+```bash
+grep -E '^(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN)=' .env
+```
+
+If not found, ask again.
 
 ## 5. Set Up Channels
 
@@ -221,7 +275,7 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), OneCLI not running (check `curl http://127.0.0.1:10254/api/health`), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
@@ -233,4 +287,5 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Diagnostics
 
-Read and follow [diagnostics.md](diagnostics.md).
+1. Use the Read tool to read `.claude/skills/setup/diagnostics.md`.
+2. Follow every step in that file before completing setup.

@@ -88,7 +88,10 @@ export async function getAllTasks(): Promise<ScheduledTask[]> {
 export async function updateTask(
   id: string,
   updates: Partial<
-    Pick<ScheduledTask, "prompt" | "schedule_type" | "schedule_value" | "next_run" | "status">
+    Pick<
+      ScheduledTask,
+      "prompt" | "script" | "schedule_type" | "schedule_value" | "next_run" | "status"
+    >
   >,
 ): Promise<void> {
   return store.updateTask(id, updates);

@@ -36,6 +36,7 @@ const ScheduleTaskSchema = z
     schedule_value: z.string().min(1),
     context_mode: z.enum(["group", "isolated"]).optional(),
     targetJid: z.string().min(1),
+    script: z.string().optional(),
   })
   .passthrough();
 
@@ -67,6 +68,7 @@ const UpdateTaskSchema = z
     prompt: z.string().optional(),
     schedule_type: z.enum(["cron", "interval", "once"]).optional(),
     schedule_value: z.string().optional(),
+    script: z.string().optional(),
   })
   .passthrough();
 
@@ -143,6 +145,7 @@ export const ContainerInputSchema = z
     isMain: z.boolean(),
     isScheduledTask: z.boolean().optional(),
     assistantName: z.string().optional(),
+    script: z.string().optional(),
     mcpServers: z
       .record(
         z.string(),

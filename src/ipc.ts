@@ -241,6 +241,7 @@ export async function processTaskIpc(
         group_folder: targetFolder,
         chat_jid: data.targetJid,
         prompt: data.prompt,
+        script: (data.script as string) || null,
         schedule_type: data.schedule_type,
         schedule_value: data.schedule_value,
         context_mode: contextMode,
@@ -302,6 +303,7 @@ export async function processTaskIpc(
 
       const updates: Parameters<typeof updateTask>[1] = {};
       if (data.prompt !== undefined) updates.prompt = data.prompt;
+      if (data.script !== undefined) updates.script = (data.script as string) || null;
       if (data.schedule_type !== undefined) updates.schedule_type = data.schedule_type;
       if (data.schedule_value !== undefined) updates.schedule_value = data.schedule_value;
 

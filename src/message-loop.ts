@@ -9,6 +9,7 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
+  getTriggerPattern,
 } from "./config.js";
 import type { GroupQueue } from "./group-queue.js";
 import { logger } from "./logger.js";
@@ -104,9 +105,12 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           // Find the first *authorized* session command in the batch.
           // Scanning only the first command could miss an admin /compact that
           // follows an untrusted one in the same poll batch.
+          const loopGroupTrigger = getTriggerPattern(group.trigger);
+          const loopIsDiscord = chatJid.startsWith("dc:");
           const loopCmdMsg = groupMessages.find(
             (m) =>
-              extractSessionCommand(m.content, TRIGGER_PATTERN) !== null &&
+              (extractSessionCommand(m.content, loopGroupTrigger) !== null ||
+                (loopIsDiscord && extractSessionCommand(m.content, TRIGGER_PATTERN) !== null)) &&
               isSessionCommandAllowed(isMainGroup, m.is_from_me === true),
           );
 
@@ -128,9 +132,14 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
+            const groupTrigger = getTriggerPattern(group.trigger);
+            const isDiscord = chatJid.startsWith("dc:");
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
+                // Match group-specific trigger; also accept default @ASSISTANT_NAME
+                // for Discord channels whose mention rewrite uses that form.
+                (groupTrigger.test(m.content.trim()) ||
+                  (isDiscord && TRIGGER_PATTERN.test(m.content.trim()))) &&
                 (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;

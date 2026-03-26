@@ -240,14 +240,28 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   // groups. Recompiled on container startup via entrypoint.sh.
   const agentRunnerSrc = path.join(APP_DIR, "container", "agent-runner", "src");
   const groupAgentRunnerDir = path.join(DATA_DIR, "sessions", group.folder, "agent-runner-src");
-  fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
   if (fs.existsSync(agentRunnerSrc)) {
-    for (const file of fs.readdirSync(agentRunnerSrc)) {
-      const dest = path.join(groupAgentRunnerDir, file);
-      if (!fs.existsSync(dest)) {
-        fs.cpSync(path.join(agentRunnerSrc, file), dest, { recursive: true });
+    // Compare newest mtime across all source files — not just index.ts —
+    // so changes to ipc-mcp-stdio.ts, mcp-http-bridge.ts, etc. also trigger refresh.
+    const maxMtime = (dir: string): number => {
+      try {
+        return fs
+          .readdirSync(dir)
+          .reduce((max, f) => Math.max(max, fs.statSync(path.join(dir, f)).mtimeMs), 0);
+      } catch {
+        return 0;
       }
+    };
+    const needsCopy =
+      !fs.existsSync(groupAgentRunnerDir) ||
+      maxMtime(agentRunnerSrc) > maxMtime(groupAgentRunnerDir);
+    if (needsCopy) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }
+  } else {
+    // Ensure the mount target exists even when the source directory is absent
+    // (e.g., dist-only packaging). Prevents ENOENT in mount and chown steps.
+    fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: resolveHostPath(groupAgentRunnerDir),
