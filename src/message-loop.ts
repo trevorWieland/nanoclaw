@@ -8,7 +8,7 @@ import {
   MAX_PROMPT_MESSAGES,
   POLL_INTERVAL,
   TIMEZONE,
-  TRIGGER_PATTERN,
+  getTriggerPattern,
 } from "./config.js";
 import type { GroupQueue } from "./group-queue.js";
 import { logger } from "./logger.js";
@@ -106,7 +106,7 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           // follows an untrusted one in the same poll batch.
           const loopCmdMsg = groupMessages.find(
             (m) =>
-              extractSessionCommand(m.content, TRIGGER_PATTERN) !== null &&
+              extractSessionCommand(m.content, getTriggerPattern(group.trigger)) !== null &&
               isSessionCommandAllowed(isMainGroup, m.is_from_me === true),
           );
 
@@ -130,7 +130,7 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
             const allowlistCfg = loadSenderAllowlist();
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
+                getTriggerPattern(group.trigger).test(m.content.trim()) &&
                 (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;

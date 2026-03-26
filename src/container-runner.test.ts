@@ -382,14 +382,12 @@ describe("container-runner agent-runner sync", () => {
     vi.useRealTimers();
   });
 
-  it("refreshes agent-runner cache when source is newer than cached", async () => {
-    // mtime-aware: cpSync the entire dir when source index.ts is newer
+  it("refreshes agent-runner cache when any source file is newer than cached", async () => {
+    // maxMtime compares all files in src vs cached dir
     vi.mocked(fs.existsSync).mockImplementation((p: fs.PathLike) => {
       const s = p.toString();
       if (s.endsWith("container/agent-runner/src")) return true;
       if (s.endsWith("agent-runner-src")) return true;
-      if (s.endsWith("agent-runner-src/index.ts")) return true;
-      if (s.endsWith("container/agent-runner/src/index.ts")) return true;
       if (s.includes("container/skills")) return false;
       if (s.endsWith("/global")) return false;
       if (s.endsWith(".env")) return false;
@@ -397,13 +395,24 @@ describe("container-runner agent-runner sync", () => {
       return false;
     });
 
+    vi.mocked(fs.readdirSync).mockImplementation(((p: fs.PathLike) => {
+      const s = p.toString();
+      if (s.endsWith("container/agent-runner/src")) return ["index.ts", "ipc-mcp-stdio.ts"];
+      if (s.endsWith("agent-runner-src")) return ["index.ts", "ipc-mcp-stdio.ts"];
+      return [];
+    }) as typeof fs.readdirSync);
+
     vi.mocked(fs.statSync).mockImplementation(((p: fs.PathLike) => {
       const s = p.toString();
-      // Source is newer (mtimeMs = 2000) than cached (mtimeMs = 1000)
-      if (s.includes("container/agent-runner/src/index.ts")) {
+      // ipc-mcp-stdio.ts is newer in source (2000) than cached (1000)
+      if (s.includes("container/agent-runner/src/ipc-mcp-stdio.ts")) {
         return { isDirectory: () => false, mtimeMs: 2000 } as fs.Stats;
       }
-      if (s.includes("agent-runner-src/index.ts")) {
+      // index.ts is same age in both
+      if (s.includes("index.ts")) {
+        return { isDirectory: () => false, mtimeMs: 1000 } as fs.Stats;
+      }
+      if (s.includes("ipc-mcp-stdio.ts")) {
         return { isDirectory: () => false, mtimeMs: 1000 } as fs.Stats;
       }
       return { isDirectory: () => true, mtimeMs: 1000 } as fs.Stats;
@@ -411,7 +420,6 @@ describe("container-runner agent-runner sync", () => {
 
     const resultPromise = runContainerAgent(testGroup, testInput, () => {});
 
-    // cpSync should be called with recursive: true for the entire dir
     const cpCalls = vi.mocked(fs.cpSync).mock.calls;
     const agentRunnerCopies = cpCalls.filter(([src]) => src.toString().includes("agent-runner"));
 

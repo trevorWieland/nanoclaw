@@ -1,3 +1,4 @@
+import Database from "better-sqlite3";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -13,8 +14,24 @@ describe("claw skill script", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "claw-skill-test-"));
       const binDir = path.join(tempDir, "bin");
       fs.mkdirSync(binDir, { recursive: true });
-      // Create a groups dir so claw can resolve a fallback group folder
+      // Create groups dir and a minimal DB so claw can resolve the group
       fs.mkdirSync(path.join(tempDir, "groups", "test-group"), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, "store"), { recursive: true });
+      const db = new Database(path.join(tempDir, "store", "messages.db"));
+      db.exec(`CREATE TABLE registered_groups (
+        name TEXT, folder TEXT, jid TEXT, trigger TEXT, added_at TEXT,
+        requiresTrigger INTEGER DEFAULT 1, is_main INTEGER DEFAULT 0
+      )`);
+      db.prepare("INSERT INTO registered_groups VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        "Test Group",
+        "test-group",
+        "tg:123",
+        "@Andy",
+        new Date().toISOString(),
+        1,
+        0,
+      );
+      db.close();
 
       const runtimePath = path.join(binDir, "container");
       fs.writeFileSync(

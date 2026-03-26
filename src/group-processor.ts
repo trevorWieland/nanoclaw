@@ -9,7 +9,7 @@ import {
   IDLE_TIMEOUT,
   MAX_PROMPT_MESSAGES,
   TIMEZONE,
-  TRIGGER_PATTERN,
+  getTriggerPattern,
 } from "./config.js";
 import type { AvailableGroup, ContainerOutput } from "./container-runner.js";
 import type { GroupQueue } from "./group-queue.js";
@@ -236,7 +236,7 @@ export function createGroupProcessor(
       missedMessages,
       isMainGroup,
       groupName: group.name,
-      triggerPattern: TRIGGER_PATTERN,
+      triggerPattern: getTriggerPattern(group.trigger),
       timezone: TIMEZONE,
       deps: {
         sendMessage: (text) => channel.sendMessage(chatJid, text),
@@ -249,7 +249,7 @@ export function createGroupProcessor(
         },
         formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
         canSenderInteract: (msg) => {
-          const hasTrigger = TRIGGER_PATTERN.test(msg.content.trim());
+          const hasTrigger = getTriggerPattern(group.trigger).test(msg.content.trim());
           const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
           return (
             isMainGroup ||
@@ -324,7 +324,7 @@ export function createGroupProcessor(
         const allowlistCfg = loadSenderAllowlist();
         const triggerIdx = missedMessages.findIndex(
           (m) =>
-            TRIGGER_PATTERN.test(m.content.trim()) &&
+            getTriggerPattern(group.trigger).test(m.content.trim()) &&
             (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
         );
         if (triggerIdx < 0) {

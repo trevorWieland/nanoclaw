@@ -29,6 +29,10 @@ const mockConfig = vi.hoisted(() => ({
   MAX_PROMPT_MESSAGES: 200,
   TIMEZONE: "UTC",
   TRIGGER_PATTERN: /^@Andy\b/i,
+  getTriggerPattern: (trigger?: string) =>
+    trigger
+      ? new RegExp(`^${trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")
+      : /^@Andy\b/i,
 }));
 
 vi.mock("./config.js", () => mockConfig);

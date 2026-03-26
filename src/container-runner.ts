@@ -241,12 +241,20 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   const agentRunnerSrc = path.join(APP_DIR, "container", "agent-runner", "src");
   const groupAgentRunnerDir = path.join(DATA_DIR, "sessions", group.folder, "agent-runner-src");
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, "index.ts");
-    const cachedIndex = path.join(groupAgentRunnerDir, "index.ts");
+    // Compare newest mtime across all source files — not just index.ts —
+    // so changes to ipc-mcp-stdio.ts, mcp-http-bridge.ts, etc. also trigger refresh.
+    const maxMtime = (dir: string): number => {
+      try {
+        return fs
+          .readdirSync(dir)
+          .reduce((max, f) => Math.max(max, fs.statSync(path.join(dir, f)).mtimeMs), 0);
+      } catch {
+        return 0;
+      }
+    };
     const needsCopy =
       !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) && fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      maxMtime(agentRunnerSrc) > maxMtime(groupAgentRunnerDir);
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }

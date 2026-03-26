@@ -168,7 +168,19 @@ def run_container(runtime: str, image: str, payload: dict,
             else:
                 cmd += ["-v", f"{host}:{container}"]
     cmd.append(image)
-    dbg(f"cmd: {' '.join(cmd)}")
+    # Redact secrets from the command log to avoid leaking credentials
+    safe_cmd = []
+    skip_next = False
+    for part in cmd:
+        if skip_next:
+            safe_cmd.append("***")
+            skip_next = False
+        elif part == "-e" and safe_cmd:
+            safe_cmd.append(part)
+            skip_next = True
+        else:
+            safe_cmd.append(part)
+    dbg(f"cmd: {' '.join(safe_cmd)}")
 
     if VERBOSE:
         dbg(f"payload: {json.dumps(payload, indent=2)}")
@@ -257,7 +269,8 @@ def run_container(runtime: str, image: str, payload: dict,
                     print(f"\n[session: {session_id}]", file=sys.stderr)
                 success = True
             else:
-                print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
+                error_detail = data.get("error") or data.get("result") or ""
+                print(f"[{status}] {error_detail}", file=sys.stderr)
                 sys.exit(1)
         except json.JSONDecodeError:
             print(match.group(1))
@@ -356,13 +369,7 @@ def main():
             group_folder = match[0]["folder"]
             is_main = match[0]["is_main"]
         else:
-            # JID not in DB — scan store/groups for a folder containing this JID
-            groups_dir = NANOCLAW_DIR / "groups"
-            if groups_dir.is_dir():
-                folders = sorted(p.name for p in groups_dir.iterdir() if p.is_dir())
-                if folders:
-                    group_folder = folders[0]
-                    dbg(f"jid '{jid}' not in DB, defaulting to first group folder: {group_folder}")
+            sys.exit(f"error: jid '{jid}' is not registered. Register the group first or use -g <name>.")
 
     runtime = detect_runtime(args.runtime)
     secrets = read_secrets(ENV_FILE)
