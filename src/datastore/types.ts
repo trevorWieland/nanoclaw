@@ -52,7 +52,10 @@ export interface DataStore {
   updateTask(
     id: string,
     updates: Partial<
-      Pick<ScheduledTask, "prompt" | "schedule_type" | "schedule_value" | "next_run" | "status">
+      Pick<
+        ScheduledTask,
+        "prompt" | "script" | "schedule_type" | "schedule_value" | "next_run" | "status"
+      >
     >,
   ): Promise<void>;
   deleteTask(id: string): Promise<void>;

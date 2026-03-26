@@ -121,19 +121,55 @@ def find_group(groups: list[dict], query: str) -> dict | None:
     return None
 
 
-def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -> None:
-    # Pass secrets as environment variables — the agent-runner reads credentials
-    # from the environment (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, etc.),
-    # not from the JSON payload.
-    secrets = payload.pop("secrets", {})
-    cmd = [runtime, "run", "-i", "--rm"]
-    for key, val in secrets.items():
-        cmd.extend(["-e", f"{key}={val}"])
-    cmd.append(image)
-    dbg(f"cmd: {' '.join(c if not c.startswith(('sk-', 'CLAUDE_')) else '***' for c in cmd)}")
+def build_mounts(folder: str, is_main: bool) -> list[tuple[str, str, bool]]:
+    """Return list of (host_path, container_path, readonly) tuples."""
+    groups_dir  = NANOCLAW_DIR / "groups"
+    data_dir    = NANOCLAW_DIR / "data"
+    sessions_dir = data_dir / "sessions" / folder
+    ipc_dir     = data_dir / "ipc" / folder
 
+    # Ensure required dirs exist
+    group_dir = groups_dir / folder
+    group_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / ".claude").mkdir(parents=True, exist_ok=True)
+    for sub in ("messages", "tasks", "input"):
+        (ipc_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    agent_runner_src = sessions_dir / "agent-runner-src"
+    project_agent_runner = NANOCLAW_DIR / "container" / "agent-runner" / "src"
+    if not agent_runner_src.exists() and project_agent_runner.exists():
+        import shutil
+        shutil.copytree(project_agent_runner, agent_runner_src)
+
+    mounts: list[tuple[str, str, bool]] = []
+    if is_main:
+        mounts.append((str(NANOCLAW_DIR), "/workspace/project", True))
+    mounts.append((str(group_dir),           "/workspace/group",    False))
+    mounts.append((str(sessions_dir / ".claude"), "/home/node/.claude", False))
+    mounts.append((str(ipc_dir),             "/workspace/ipc",      False))
+    if agent_runner_src.exists():
+        mounts.append((str(agent_runner_src), "/app/src",           False))
+    return mounts
+
+
+def run_container(runtime: str, image: str, payload: dict,
+                  folder: str | None = None, is_main: bool = False,
+                  timeout: int = 300) -> None:
+    cmd = [runtime, "run", "-i", "--rm"]
+    if folder:
+        for host, container, readonly in build_mounts(folder, is_main):
+            if readonly:
+                cmd += ["--mount", f"type=bind,source={host},target={container},readonly"]
+            else:
+                cmd += ["-v", f"{host}:{container}"]
+    cmd.append(image)
+    dbg(f"cmd: {' '.join(cmd)}")
+
+    # Show payload sans secrets
     if VERBOSE:
-        dbg(f"payload: {json.dumps(payload, indent=2)}")
+        safe = {k: v for k, v in payload.items() if k != "secrets"}
+        safe["secrets"] = {k: "***" for k in payload.get("secrets", {})}
+        dbg(f"payload: {json.dumps(safe, indent=2)}")
 
     proc = subprocess.Popen(
         cmd,
@@ -171,7 +207,12 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 dbg("output sentinel found, terminating container")
                 done.set()
                 try:
-                    proc.kill()
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        dbg("graceful stop timed out, force killing container")
+                        proc.kill()
                 except ProcessLookupError:
                     pass
                 return
@@ -201,6 +242,8 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         stdout,
         re.DOTALL,
     )
+    success = False
+
     if match:
         try:
             data = json.loads(match.group(1))
@@ -210,8 +253,9 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
                 session_id = data.get("newSessionId") or data.get("sessionId")
                 if session_id:
                     print(f"\n[session: {session_id}]", file=sys.stderr)
+                success = True
             else:
-                print(f"[{status}] {data.get('error') or data.get('result', '')}", file=sys.stderr)
+                print(f"[{status}] {data.get('result', '')}", file=sys.stderr)
                 sys.exit(1)
         except json.JSONDecodeError:
             print(match.group(1))
@@ -219,10 +263,10 @@ def run_container(runtime: str, image: str, payload: dict, timeout: int = 300) -
         # No structured output — print raw stdout
         print(stdout)
 
-    # Don't fail on non-zero exit if we killed the container after receiving
-    # the output sentinel — the kill (SIGKILL → rc -9) is intentional since
-    # the Node.js event loop often keeps the process alive indefinitely.
-    if proc.returncode not in (0, None) and not done.is_set():
+    if success:
+        return
+
+    if proc.returncode not in (0, None):
         sys.exit(proc.returncode)
 
 
@@ -283,17 +327,6 @@ def main():
     group_folder = None
     is_main = False
 
-    if args.jid:
-        # When using -j, resolve folder from the registered groups DB
-        g = next((g for g in groups if g["jid"] == args.jid), None)
-        if g:
-            group_name = g["name"]
-            group_folder = g["folder"]
-            is_main = g["is_main"]
-        else:
-            # JID not in DB — use JID as folder fallback
-            group_folder = args.jid
-
     if args.group:
         g = find_group(groups, args.group)
         if g is None:
@@ -322,16 +355,19 @@ def main():
     payload: dict = {
         "prompt": prompt,
         "chatJid": jid,
-        "groupFolder": group_folder,
         "isMain": is_main,
         "secrets": secrets,
     }
+    if group_name:
+        payload["groupFolder"] = group_name
     if args.session:
         payload["sessionId"] = args.session
         payload["resumeAt"] = "latest"
 
     print(f"[{group_name or jid}] running via {runtime}...", file=sys.stderr)
-    run_container(runtime, args.image, payload, timeout=args.timeout)
+    run_container(runtime, args.image, payload,
+                  folder=group_folder, is_main=is_main,
+                  timeout=args.timeout)
 
 
 if __name__ == "__main__":

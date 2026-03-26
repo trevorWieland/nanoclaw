@@ -9,7 +9,7 @@
 | Main group        | Trusted     | Private self-chat, admin control |
 | Non-main groups   | Untrusted   | Other users may be malicious     |
 | Container agents  | Sandboxed   | Isolated execution environment   |
-| WhatsApp messages | User input  | Potential prompt injection       |
+| Incoming messages | User input  | Potential prompt injection       |
 
 ## Security Boundaries
 
@@ -89,7 +89,7 @@ Real API credentials **never enter containers**. Instead, the host runs an HTTP 
 
 **NOT Mounted:**
 
-- WhatsApp session (`store/auth/`) - host only
+- Channel auth sessions (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
 - Any credentials matching blocked patterns
 - `.env` is shadowed with `/dev/null` in the project root mount
@@ -121,7 +121,7 @@ These controls reduce noise and rate-limit churn when credentials expire or are 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
+│  Incoming Messages (potentially malicious)                         │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Trigger check, input escaping

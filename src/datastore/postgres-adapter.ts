@@ -49,6 +49,7 @@ const MIGRATIONS: Migration[] = [
           schedule_type TEXT NOT NULL,
           schedule_value TEXT NOT NULL,
           context_mode TEXT DEFAULT 'isolated',
+          script TEXT,
           next_run TEXT,
           last_run TEXT,
           last_result TEXT,
@@ -314,8 +315,8 @@ export class PostgresAdapter implements DataStore {
 
   async createTask(task: Omit<ScheduledTask, "last_run" | "last_result">): Promise<void> {
     await this.sql`
-      INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-      VALUES (${task.id}, ${task.group_folder}, ${task.chat_jid}, ${task.prompt}, ${task.schedule_type}, ${task.schedule_value}, ${task.context_mode || "isolated"}, ${task.next_run}, ${task.status}, ${task.created_at})
+      INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, script, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+      VALUES (${task.id}, ${task.group_folder}, ${task.chat_jid}, ${task.prompt}, ${task.script || null}, ${task.schedule_type}, ${task.schedule_value}, ${task.context_mode || "isolated"}, ${task.next_run}, ${task.status}, ${task.created_at})
     `;
   }
 
@@ -331,7 +332,10 @@ export class PostgresAdapter implements DataStore {
   async updateTask(
     id: string,
     updates: Partial<
-      Pick<ScheduledTask, "prompt" | "schedule_type" | "schedule_value" | "next_run" | "status">
+      Pick<
+        ScheduledTask,
+        "prompt" | "script" | "schedule_type" | "schedule_value" | "next_run" | "status"
+      >
     >,
   ): Promise<void> {
     const sets: string[] = [];
@@ -341,6 +345,10 @@ export class PostgresAdapter implements DataStore {
     if (updates.prompt !== undefined) {
       sets.push(`prompt = $${idx++}`);
       values.push(updates.prompt);
+    }
+    if (updates.script !== undefined) {
+      sets.push(`script = $${idx++}`);
+      values.push(updates.script || null);
     }
     if (updates.schedule_type !== undefined) {
       sets.push(`schedule_type = $${idx++}`);

@@ -6,8 +6,10 @@ import { logger } from "../src/logger.js";
 import { emitStatus } from "./status.js";
 
 const STEPS: Record<string, () => Promise<{ run: (args: string[]) => Promise<void> }>> = {
+  timezone: () => import("./timezone.js"),
   environment: () => import("./environment.js"),
   container: () => import("./container.js"),
+  groups: () => import("./groups.js"),
   register: () => import("./register.js"),
   mounts: () => import("./mounts.js"),
   service: () => import("./service.js"),
