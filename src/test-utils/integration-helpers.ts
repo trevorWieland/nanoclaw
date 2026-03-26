@@ -11,8 +11,8 @@ import { PassThrough } from "stream";
 import type { Channel, NewMessage, RegisteredGroup } from "../types.js";
 
 // Sentinel markers — must match container-runner.ts
-const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
-const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
+export const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
+export const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
 // ─── MockChannel ───────────────────────────────────────────────────
 

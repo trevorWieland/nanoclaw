@@ -159,35 +159,43 @@ describe("IPC processing integration", () => {
   });
 
   it("schedule_task creates task in DB with correct next_run", async () => {
-    await writeIpcTask("main-group", "task1.json", {
-      type: "schedule_task",
-      targetJid: "main@test",
-      prompt: "daily check",
-      schedule_type: "interval",
-      schedule_value: "60000",
-    });
+    // Pin time to eliminate CI flakiness from filesystem I/O jitter
+    vi.useFakeTimers();
+    const fixedNow = new Date("2024-06-01T00:00:00.000Z");
+    vi.setSystemTime(fixedNow);
 
-    const deps = createDeps();
-    const beforeTime = Date.now();
-    await processIpcFiles(ipcBaseDir, deps);
+    try {
+      await writeIpcTask("main-group", "task1.json", {
+        type: "schedule_task",
+        targetJid: "main@test",
+        prompt: "daily check",
+        schedule_type: "interval",
+        schedule_value: "60000",
+      });
 
-    expect(deps.onTasksChanged).toHaveBeenCalled();
+      const deps = createDeps();
+      await processIpcFiles(ipcBaseDir, deps);
 
-    const tasks = await getAllTasks();
-    expect(tasks.length).toBe(1);
+      expect(deps.onTasksChanged).toHaveBeenCalled();
 
-    const task = tasks[0];
-    expect(task.prompt).toBe("daily check");
-    expect(task.schedule_type).toBe("interval");
-    expect(task.schedule_value).toBe("60000");
-    expect(task.group_folder).toBe("main-group");
-    expect(task.chat_jid).toBe("main@test");
-    expect(task.status).toBe("active");
+      const tasks = await getAllTasks();
+      expect(tasks.length).toBe(1);
 
-    // next_run should be ~60s from now
-    const nextRun = new Date(task.next_run!).getTime();
-    expect(nextRun).toBeGreaterThanOrEqual(beforeTime + 60000 - 100);
-    expect(nextRun).toBeLessThanOrEqual(Date.now() + 60000 + 100);
+      const task = tasks[0];
+      expect(task.prompt).toBe("daily check");
+      expect(task.schedule_type).toBe("interval");
+      expect(task.schedule_value).toBe("60000");
+      expect(task.group_folder).toBe("main-group");
+      expect(task.chat_jid).toBe("main@test");
+      expect(task.status).toBe("active");
+
+      // next_run should be exactly fixedNow + 60s (time is frozen)
+      const expectedNextRun = fixedNow.getTime() + 60000;
+      const actualNextRun = new Date(task.next_run!).getTime();
+      expect(actualNextRun).toBe(expectedNextRun);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("pause_task updates task status", async () => {

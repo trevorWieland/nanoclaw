@@ -114,6 +114,8 @@ vi.mock("fs", async () => {
 import {
   FakeContainerProcess,
   MockChannel,
+  OUTPUT_END_MARKER,
+  OUTPUT_START_MARKER,
   makeTestGroup,
   makeTestMessage,
 } from "./test-utils/integration-helpers.js";
@@ -219,10 +221,6 @@ function scheduleOutput(
     return latestFakeProcess;
   }) as unknown as typeof spawn);
 }
-
-// Sentinel markers — must match container-runner.ts
-const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
-const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
 // ── Tests ────────────────────────────────────────────────────────────
 
