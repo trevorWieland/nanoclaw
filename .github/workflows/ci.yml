@@ -24,3 +24,6 @@ jobs:
 
       - name: Coverage enforcement
         run: pnpm run test:coverage
+
+      - name: Integration tests
+        run: pnpm run test:integration
