@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": ["scripts/*.ts"],
   "project": ["src/**/*.ts", "setup/**/*.ts", "scripts/**/*.ts"],
-  "ignoreDependencies": ["pino-pretty"],
+  "ignoreDependencies": ["pino-pretty", "@modelcontextprotocol/sdk"],
   "ignoreExportsUsedInFile": false,
   "rules": {
     "files": "error",

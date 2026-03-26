@@ -71,22 +71,27 @@ function shutdown() {
   );
 }
 
+// Stdio close means the SDK closed the pipe — shut down cleanly.
 stdio.onclose = shutdown;
+// Remote close means the server disconnected — shut down so the SDK re-spawns us.
 remote.onclose = shutdown;
 stdio.onerror = (err) => {
   process.stderr.write(`mcp-http-bridge: stdio error: ${err}\n`);
   shutdown();
 };
+// Remote transport errors are non-fatal (e.g., SSE GET rejected by a
+// stateless server).  Log but keep running — POST-based message exchange
+// may still work.
 remote.onerror = (err) => {
   process.stderr.write(`mcp-http-bridge: remote error: ${err}\n`);
-  shutdown();
 };
 
-// Start transports (remote first so SSE connections are established before
-// we start reading from stdin).
+// Start the stdio transport so we begin reading from stdin.
+// For HTTP transports, start() attempts a GET for SSE streaming which some
+// servers may not support — catch and log but don't abort.
 try {
   await remote.start();
-  await stdio.start();
 } catch (err) {
-  fatal(`failed to start transports: ${err}`);
+  process.stderr.write(`mcp-http-bridge: remote start failed (non-fatal): ${err}\n`);
 }
+await stdio.start();
