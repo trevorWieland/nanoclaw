@@ -651,7 +651,10 @@ interface ScriptResult {
 
 const SCRIPT_TIMEOUT_MS = 30_000;
 
-async function runScript(script: string): Promise<ScriptResult | null> {
+async function runScript(
+  script: string,
+  groupWorkspace = "/workspace/group",
+): Promise<ScriptResult | null> {
   const scriptPath = "/tmp/task-script.sh";
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
 
@@ -660,6 +663,7 @@ async function runScript(script: string): Promise<ScriptResult | null> {
       "bash",
       [scriptPath],
       {
+        cwd: groupWorkspace,
         timeout: SCRIPT_TIMEOUT_MS,
         maxBuffer: 1024 * 1024,
         env: process.env,

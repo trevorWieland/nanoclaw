@@ -8,6 +8,7 @@ import {
   MAX_PROMPT_MESSAGES,
   POLL_INTERVAL,
   TIMEZONE,
+  TRIGGER_PATTERN,
   getTriggerPattern,
 } from "./config.js";
 import type { GroupQueue } from "./group-queue.js";
@@ -128,9 +129,12 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
+            const groupTrigger = getTriggerPattern(group.trigger);
             const hasTrigger = groupMessages.some(
               (m) =>
-                getTriggerPattern(group.trigger).test(m.content.trim()) &&
+                // Match group-specific trigger OR the default trigger (covers
+                // Discord mention rewrites which always prepend @ASSISTANT_NAME).
+                (groupTrigger.test(m.content.trim()) || TRIGGER_PATTERN.test(m.content.trim())) &&
                 (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;
