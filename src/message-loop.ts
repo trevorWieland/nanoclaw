@@ -105,9 +105,12 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           // Find the first *authorized* session command in the batch.
           // Scanning only the first command could miss an admin /compact that
           // follows an untrusted one in the same poll batch.
+          const loopGroupTrigger = getTriggerPattern(group.trigger);
+          const loopIsDiscord = chatJid.startsWith("dc:");
           const loopCmdMsg = groupMessages.find(
             (m) =>
-              extractSessionCommand(m.content, getTriggerPattern(group.trigger)) !== null &&
+              (extractSessionCommand(m.content, loopGroupTrigger) !== null ||
+                (loopIsDiscord && extractSessionCommand(m.content, TRIGGER_PATTERN) !== null)) &&
               isSessionCommandAllowed(isMainGroup, m.is_from_me === true),
           );
 
@@ -130,11 +133,13 @@ export async function startMessageLoop(deps: MessageLoopDeps): Promise<void> {
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
             const groupTrigger = getTriggerPattern(group.trigger);
+            const isDiscord = chatJid.startsWith("dc:");
             const hasTrigger = groupMessages.some(
               (m) =>
-                // Match group-specific trigger OR the default trigger (covers
-                // Discord mention rewrites which always prepend @ASSISTANT_NAME).
-                (groupTrigger.test(m.content.trim()) || TRIGGER_PATTERN.test(m.content.trim())) &&
+                // Match group-specific trigger; also accept default @ASSISTANT_NAME
+                // for Discord channels whose mention rewrite uses that form.
+                (groupTrigger.test(m.content.trim()) ||
+                  (isDiscord && TRIGGER_PATTERN.test(m.content.trim()))) &&
                 (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
             if (!hasTrigger) continue;

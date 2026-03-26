@@ -233,11 +233,18 @@ export function createGroupProcessor(
     }
 
     // --- Session command interception (before trigger check) ---
+    // For Discord channels, combine the group trigger with the default trigger
+    // so mention-rewritten commands like "@Andy /compact" are recognized.
+    const groupTriggerRe = getTriggerPattern(group.trigger);
+    const sessionTrigger =
+      chatJid.startsWith("dc:") && group.trigger
+        ? new RegExp(`(?:${groupTriggerRe.source})|(?:${TRIGGER_PATTERN.source})`, "i")
+        : groupTriggerRe;
     const cmdResult = await handleSessionCommand({
       missedMessages,
       isMainGroup,
       groupName: group.name,
-      triggerPattern: getTriggerPattern(group.trigger),
+      triggerPattern: sessionTrigger,
       timezone: TIMEZONE,
       deps: {
         sendMessage: (text) => channel.sendMessage(chatJid, text),
@@ -251,8 +258,12 @@ export function createGroupProcessor(
         formatMessages: (msgs, tz) => formatMessagesWithCap(msgs, tz, MAX_PROMPT_MESSAGES),
         canSenderInteract: (msg) => {
           const content = msg.content.trim();
+          // Accept per-group trigger; also accept default @ASSISTANT_NAME for Discord
+          // channels whose mention rewrite always produces the default trigger form.
+          const isDiscord = chatJid.startsWith("dc:");
           const hasTrigger =
-            getTriggerPattern(group.trigger).test(content) || TRIGGER_PATTERN.test(content);
+            getTriggerPattern(group.trigger).test(content) ||
+            (isDiscord && TRIGGER_PATTERN.test(content));
           const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
           return (
             isMainGroup ||
@@ -326,11 +337,13 @@ export function createGroupProcessor(
         // Normal path: require a trigger
         const allowlistCfg = loadSenderAllowlist();
         const groupTrigger = getTriggerPattern(group.trigger);
+        const isDiscord = chatJid.startsWith("dc:");
         const triggerIdx = missedMessages.findIndex(
           (m) =>
-            // Match group-specific trigger OR the default trigger (covers
-            // Discord mention rewrites which always prepend @ASSISTANT_NAME).
-            (groupTrigger.test(m.content.trim()) || TRIGGER_PATTERN.test(m.content.trim())) &&
+            // Match group-specific trigger; also accept default @ASSISTANT_NAME
+            // for Discord channels whose mention rewrite uses that form.
+            (groupTrigger.test(m.content.trim()) ||
+              (isDiscord && TRIGGER_PATTERN.test(m.content.trim()))) &&
             (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
         );
         if (triggerIdx < 0) {

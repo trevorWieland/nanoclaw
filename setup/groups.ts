@@ -127,10 +127,10 @@ if (!fs.existsSync(authDir)) {
 
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
-db.exec('CREATE TABLE IF NOT EXISTS chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TEXT)');
+db.exec('CREATE TABLE IF NOT EXISTS chats (jid TEXT PRIMARY KEY, name TEXT, last_message_time TEXT, channel TEXT, is_group INTEGER)');
 
 const upsert = db.prepare(
-  'INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?) ON CONFLICT(jid) DO UPDATE SET name = excluded.name'
+  'INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, \\'whatsapp\\', 1) ON CONFLICT(jid) DO UPDATE SET name = excluded.name, channel = \\'whatsapp\\', is_group = 1'
 );
 
 const { state, saveCreds } = await useMultiFileAuthState(authDir);
