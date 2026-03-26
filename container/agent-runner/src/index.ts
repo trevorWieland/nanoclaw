@@ -17,14 +17,10 @@
 import fs from "fs";
 import { access, mkdir, readdir, readFile, unlink } from "fs/promises";
 import path from "path";
-import {
-  query,
-  HookCallback,
-  McpServerConfig,
-  PreCompactHookInput,
-} from "@anthropic-ai/claude-agent-sdk";
+import { query, HookCallback, PreCompactHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { fileURLToPath } from "url";
 import { z } from "zod";
+import { buildMcpServers } from "./mcp-proxy.js";
 
 const ContainerInputSchema = z.object({
   prompt: z.string(),
@@ -454,6 +450,7 @@ async function runQuery(
   prompt: string,
   sessionId: string | undefined,
   mcpServerPath: string,
+  bridgePath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
@@ -580,25 +577,7 @@ async function runQuery(
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       settingSources: ["project", "user"],
-      mcpServers: (() => {
-        const servers: Record<string, McpServerConfig> = {
-          nanoclaw: {
-            command: "node",
-            args: [mcpServerPath],
-            env: {
-              NANOCLAW_CHAT_JID: containerInput.chatJid,
-              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-              NANOCLAW_IS_MAIN: containerInput.isMain ? "1" : "0",
-            },
-          },
-        };
-        if (containerInput.mcpServers) {
-          for (const [name, server] of Object.entries(containerInput.mcpServers)) {
-            servers[name] = server;
-          }
-        }
-        return servers;
-      })(),
+      mcpServers: buildMcpServers(mcpServerPath, bridgePath, containerInput),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
@@ -690,6 +669,7 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, "ipc-mcp-stdio.js");
+  const bridgePath = path.join(__dirname, "mcp-http-bridge.js");
   let sessionId = containerInput.sessionId;
   await mkdir(IPC_INPUT_DIR, { recursive: true });
 
@@ -742,6 +722,7 @@ async function main(): Promise<void> {
           resume: sessionId,
           systemPrompt: undefined,
           allowedTools: [],
+          mcpServers: buildMcpServers(mcpServerPath, bridgePath, containerInput),
           env: sdkEnv,
           permissionMode: "bypassPermissions" as const,
           allowDangerouslySkipPermissions: true,
@@ -834,6 +815,7 @@ async function main(): Promise<void> {
         prompt,
         sessionId,
         mcpServerPath,
+        bridgePath,
         containerInput,
         sdkEnv,
         resumeAt,

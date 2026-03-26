@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.integration.test.ts"],
+    include: ["src/**/*.integration.test.ts", "container/**/*.integration.test.ts"],
     testTimeout: 30_000,
     // No coverage block — integration tests don't count toward unit coverage thresholds
   },
